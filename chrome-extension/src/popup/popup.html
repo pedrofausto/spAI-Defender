@@ -25,6 +25,27 @@
       </div>
     </section>
 
+    <!-- Security Dashboard -->
+    <section class="dashboard-section" id="dashboardSection">
+      <div class="security-stats">
+        <div class="stat-card risk-level">
+          <span class="stat-label">Current Risk</span>
+          <span class="stat-value" id="riskScore">-</span>
+          <div class="risk-bar">
+            <div class="risk-fill" id="riskFill"></div>
+          </div>
+        </div>
+        <div class="stat-card threats-blocked">
+          <span class="stat-label">Threats Blocked</span>
+          <span class="stat-value" id="threatsCount">0</span>
+        </div>
+        <div class="stat-card pages-analyzed">
+          <span class="stat-label">Pages Analyzed</span>
+          <span class="stat-value" id="pagesCount">0</span>
+        </div>
+      </div>
+    </section>
+
     <!-- Tab Information -->
     <section class="tab-section">
       <h2 class="section-title">Current Tab</h2>
@@ -58,6 +79,16 @@
           <span class="btn-icon">💬</span>
           Custom Prompt
         </button>
+
+        <button class="btn btn-primary" id="phishingScanBtn" disabled>
+          <span class="btn-icon">🛡️</span>
+          Scan for Phishing
+        </button>
+
+        <button class="btn btn-secondary" id="sentimentBtn" disabled>
+          <span class="btn-icon">😊</span>
+          Sentiment Analysis
+        </button>
       </div>
     </section>
 
@@ -84,6 +115,61 @@
       </div>
       <div class="results-content" id="resultsContent">
         <!-- Results will be displayed here -->
+      </div>
+    </section>
+
+    <!-- Advanced Metrics (Hidden by default) -->
+    <section class="advanced-metrics" id="advancedMetrics" style="display: none;">
+      <div class="metrics-header">
+        <h3 class="section-subtitle">Advanced Analysis</h3>
+        <button class="btn-icon-only" id="closeMetricsBtn">✖️</button>
+      </div>
+      
+      <!-- VAD Profile -->
+      <div class="metric-group" id="vadGroup">
+        <h4 class="metric-title">Emotional Profile (VAD)</h4>
+        <div class="vad-display">
+          <div class="vad-dimension">
+            <span class="vad-label">Valence:</span>
+            <div class="vad-bar" id="valenceBar">
+              <div class="vad-fill" id="valenceFill"></div>
+            </div>
+            <span class="vad-value" id="valenceValue">0</span>
+          </div>
+          <div class="vad-dimension">
+            <span class="vad-label">Arousal:</span>
+            <div class="vad-bar" id="arousalBar">
+              <div class="vad-fill" id="arousalFill"></div>
+            </div>
+            <span class="vad-value" id="arousalValue">0</span>
+          </div>
+          <div class="vad-dimension">
+            <span class="vad-label">Dominance:</span>
+            <div class="vad-bar" id="dominanceBar">
+              <div class="vad-fill" id="dominanceFill"></div>
+            </div>
+            <span class="vad-value" id="dominanceValue">0</span>
+          </div>
+        </div>
+        <div class="emotional-state" id="emotionalState"></div>
+      </div>
+
+      <!-- Lexicon Scores -->
+      <div class="metric-group" id="lexiconGroup">
+        <h4 class="metric-title">Dominant Lexicons</h4>
+        <div class="lexicon-scores" id="lexiconScores"></div>
+      </div>
+
+      <!-- Linguistic Features -->
+      <div class="metric-group" id="linguisticGroup">
+        <h4 class="metric-title">Linguistic Anomalies</h4>
+        <div class="anomalies-list" id="anomaliesList"></div>
+      </div>
+
+      <!-- Confidence Scores -->
+      <div class="metric-group" id="confidenceGroup">
+        <h4 class="metric-title">Confidence Breakdown</h4>
+        <div class="confidence-scores" id="confidenceScores"></div>
       </div>
     </section>
 

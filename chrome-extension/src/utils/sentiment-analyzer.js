@@ -1,0 +1,314 @@
+/**
+ * Sentiment Analyzer
+ * Advanced sentiment analysis with domain-specific lexicons and multi-dimensional emotional analysis
+ */
+
+import { PhishingLexicons } from './phishing-lexicons.js';
+import { LinguisticAnalyzer } from './linguistic-analyzer.js';
+import { EmotionAnalyzer } from './emotion-analyzer.js';
+
+export class SentimentAnalyzer {
+  constructor(aiManager) {
+    this.aiManager = aiManager;
+    this.lexicons = new PhishingLexicons();
+    this.linguisticAnalyzer = new LinguisticAnalyzer();
+    this.emotionAnalyzer = new EmotionAnalyzer();
+  }
+
+  /**
+   * Analisa sentimento do conteúdo
+   */
+  async analyzeSentiment(text, url = '') {
+    try {
+      const prompt = `Analyze the sentiment, urgency, and manipulation in this content:
+
+Content: ${text.substring(0, 3000)}
+URL: ${url}
+
+Analyze:
+1. Sentiment score (-1 negative to +1 positive)
+2. Urgency level (LOW|MEDIUM|HIGH|CRITICAL)
+3. Manipulation tactics present
+4. Emotional triggers detected
+5. Pressure indicators
+
+Provide JSON response:
+{
+  "sentimentScore": -1 to 1,
+  "sentiment": "NEGATIVE|NEUTRAL|POSITIVE",
+  "urgencyLevel": "LOW|MEDIUM|HIGH|CRITICAL",
+  "manipulationDetected": true/false,
+  "emotionalTriggers": ["trigger1", "trigger2"],
+  "pressureTactics": ["tactic1", "tactic2"],
+  "trustworthiness": "TRUSTWORTHY|CAUTION|UNTRUSTWORTHY",
+  "recommendation": "SAFE|CAUTION|WARNING|DANGEROUS"
+}`;
+
+      const session = await this.aiManager.createSession({ temperature: 0.5 });
+      const response = await session.prompt(prompt);
+      
+      // Parse JSON
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      let analysis = null;
+      
+      if (jsonMatch) {
+        analysis = JSON.parse(jsonMatch[0]);
+      } else {
+        analysis = this.parseSentimentText(response);
+      }
+
+      await this.aiManager.destroySession();
+      return analysis;
+
+    } catch (error) {
+      console.error('Error analyzing sentiment:', error);
+      return {
+        sentimentScore: 0,
+        sentiment: 'NEUTRAL',
+        urgencyLevel: 'LOW',
+        manipulationDetected: false,
+        recommendation: 'SAFE'
+      };
+    }
+  }
+
+  /**
+   * Parse texto de sentimento
+   */
+  parseSentimentText(text) {
+    const analysis = {
+      sentimentScore: 0,
+      sentiment: 'NEUTRAL',
+      urgencyLevel: 'LOW',
+      manipulationDetected: false,
+      emotionalTriggers: [],
+      recommendation: 'SAFE'
+    };
+
+    const lowerText = text.toLowerCase();
+
+    // Detect sentiment
+    if (lowerText.includes('negative') || lowerText.includes('fear') || lowerText.includes('anger')) {
+      analysis.sentiment = 'NEGATIVE';
+      analysis.sentimentScore = -0.5;
+    } else if (lowerText.includes('positive') || lowerText.includes('happy') || lowerText.includes('joy')) {
+      analysis.sentiment = 'POSITIVE';
+      analysis.sentimentScore = 0.5;
+    }
+
+    // Detect urgency
+    if (lowerText.includes('critical') || lowerText.includes('immediately')) {
+      analysis.urgencyLevel = 'CRITICAL';
+      analysis.recommendation = 'WARNING';
+    } else if (lowerText.includes('urgent') || lowerText.includes('asap')) {
+      analysis.urgencyLevel = 'HIGH';
+    } else if (lowerText.includes('soon') || lowerText.includes('limited')) {
+      analysis.urgencyLevel = 'MEDIUM';
+    }
+
+    // Detect manipulation
+    analysis.manipulationDetected = lowerText.includes('manipulation') || 
+                                    lowerText.includes('pressure') ||
+                                    lowerText.includes('exploitation');
+
+    return analysis;
+  }
+
+  /**
+   * Advanced sentiment analysis with multi-stage pipeline
+   * Uses lexicons, linguistic features, VAD model, and AI analysis
+   */
+  async analyzeAdvanced(text, url = '') {
+    try {
+      // Stage 1: Lexicon-based scoring
+      const lexiconResults = this.lexicons.calculateLexiconScores(text);
+
+      // Stage 2: Linguistic feature extraction
+      const linguisticFeatures = this.linguisticAnalyzer.analyze(text);
+
+      // Stage 3: VAD emotional analysis
+      const emotionProfile = this.emotionAnalyzer.analyze(text, lexiconResults.scores);
+
+      // Stage 4: AI-based semantic analysis
+      const aiAnalysis = await this.analyzeWithAI(text, url);
+
+      // Combine all results
+      const manipulationScore = emotionProfile.manipulationScore;
+      const riskAssessment = emotionProfile.riskAssessment;
+
+      return {
+        // Overall scores
+        manipulationScore,
+        trustworthiness: this.determineTrustworthiness(manipulationScore, aiAnalysis),
+        recommendation: this.determineRecommendation(manipulationScore, emotionProfile, aiAnalysis),
+
+        // Lexicon analysis
+        lexiconScores: lexiconResults.scores,
+        dominantLexicons: lexiconResults.dominantLexicons,
+
+        // Emotional profile (VAD)
+        emotionalState: emotionProfile.emotionalState,
+        emotionalTriggers: emotionProfile.emotionalTriggers,
+        valence: emotionProfile.valence,
+        arousal: emotionProfile.arousal,
+        dominance: emotionProfile.dominance,
+
+        // Risk assessment
+        riskAssessment,
+
+        // Linguistic features
+        linguisticFeatures: linguisticFeatures.overall,
+
+        // AI analysis
+        aiAnalysis
+      };
+
+    } catch (error) {
+      console.error('Error in advanced sentiment analysis:', error);
+      return this.getDefaultAnalysis();
+    }
+  }
+
+  /**
+   * Analyze with AI for semantic understanding
+   */
+  async analyzeWithAI(text, url) {
+    try {
+      const prompt = `Analyze the sentiment and manipulation tactics in this content:
+
+URL: ${url}
+Content: ${text.substring(0, 3000)}
+
+Focus on:
+1. Emotional manipulation techniques
+2. Psychological pressure tactics
+3. Trust-building language
+4. Urgency creation methods
+5. Social engineering indicators
+
+Provide JSON response:
+{
+  "semanticScore": -1 to 1,
+  "manipulationTechniques": ["technique1", "technique2"],
+  "pressureTactics": ["tactic1", "tactic2"],
+  "trustMarkers": ["marker1", "marker2"],
+  "socialEngineering": true/false,
+  "overallAssessment": "description"
+}`;
+
+      const session = await this.aiManager.createSession({ temperature: 0.5 });
+      const response = await session.prompt(prompt);
+
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      let analysis = null;
+
+      if (jsonMatch) {
+        analysis = JSON.parse(jsonMatch[0]);
+      } else {
+        analysis = this.parseSentimentText(response);
+      }
+
+      await this.aiManager.destroySession();
+      return analysis;
+
+    } catch (error) {
+      console.error('Error in AI analysis:', error);
+      return {
+        semanticScore: 0,
+        manipulationTechniques: [],
+        pressureTactics: [],
+        trustMarkers: [],
+        socialEngineering: false
+      };
+    }
+  }
+
+  /**
+   * Determine trustworthiness level
+   */
+  determineTrustworthiness(manipulationScore, aiAnalysis) {
+    if (manipulationScore > 0.7) return 'UNTRUSTWORTHY';
+    if (manipulationScore > 0.4) return 'CAUTION';
+    if (aiAnalysis.socialEngineering) return 'CAUTION';
+    return 'TRUSTWORTHY';
+  }
+
+  /**
+   * Determine recommendation level
+   */
+  determineRecommendation(manipulationScore, emotionProfile, aiAnalysis) {
+    const riskLevel = emotionProfile.riskAssessment?.level || 'LOW';
+
+    if (manipulationScore > 0.8 || riskLevel === 'HIGH') return 'DANGEROUS';
+    if (manipulationScore > 0.6 || riskLevel === 'MEDIUM') return 'WARNING';
+    if (manipulationScore > 0.3) return 'CAUTION';
+    return 'SAFE';
+  }
+
+  /**
+   * Get default analysis for error cases
+   */
+  getDefaultAnalysis() {
+    return {
+      manipulationScore: 0,
+      trustworthiness: 'TRUSTWORTHY',
+      recommendation: 'SAFE',
+      lexiconScores: {},
+      dominantLexicons: [],
+      emotionalState: 'neutral',
+      emotionalTriggers: [],
+      valence: 0,
+      arousal: 0,
+      dominance: 0.5,
+      riskAssessment: { score: 0, level: 'LOW', confidence: 0.5 },
+      linguisticFeatures: {},
+      aiAnalysis: {}
+    };
+  }
+
+  /**
+   * Analisa mensagens do WhatsApp
+   */
+  async analyzeWhatsAppMessage(message, sender = '') {
+    try {
+      const prompt = `Analyze this WhatsApp message for suspicious patterns:
+
+Message: ${message}
+Sender: ${sender}
+
+Check for:
+1. Urgency tactics (act now, limited time)
+2. Suspicious links
+3. Request for personal information
+4. Suspicious file sharing
+5. Impersonation attempts
+
+Provide JSON:
+{
+  "isSuspicious": true/false,
+  "riskLevel": "LOW|MEDIUM|HIGH",
+  "indicators": ["indicator1", "indicator2"],
+  "recommendation": "REPLY|IGNORE|BLOCK"
+}`;
+
+      const session = await this.aiManager.createSession({ temperature: 0.3 });
+      const response = await session.prompt(prompt);
+      
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      let analysis = null;
+      
+      if (jsonMatch) {
+        analysis = JSON.parse(jsonMatch[0]);
+      }
+
+      await this.aiManager.destroySession();
+      return analysis;
+
+    } catch (error) {
+      return { isSuspicious: false, riskLevel: 'LOW', recommendation: 'REPLY' };
+    }
+  }
+}
+
+export default SentimentAnalyzer;
+

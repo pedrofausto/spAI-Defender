@@ -402,3 +402,253 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-tertiary);
 }
+
+/* Dashboard Section */
+.dashboard-section {
+  margin-bottom: 20px;
+}
+
+.security-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.stat-card {
+  padding: 12px;
+  background-color: var(--bg-secondary);
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  text-align: center;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow);
+}
+
+.stat-label {
+  display: block;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.stat-value {
+  display: block;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.stat-card.risk-level .stat-value {
+  font-size: 18px;
+}
+
+.risk-bar {
+  height: 6px;
+  background-color: var(--bg-hover);
+  border-radius: 3px;
+  margin-top: 8px;
+  overflow: hidden;
+}
+
+.risk-fill {
+  height: 100%;
+  background-color: var(--secondary-color);
+  border-radius: 3px;
+  transition: width 0.3s ease, background-color 0.3s ease;
+}
+
+.risk-fill.low {
+  background-color: var(--secondary-color);
+  width: 20%;
+}
+
+.risk-fill.medium {
+  background-color: var(--warning-color);
+  width: 50%;
+}
+
+.risk-fill.high {
+  background-color: var(--danger-color);
+  width: 75%;
+}
+
+.risk-fill.critical {
+  background-color: #d93025;
+  width: 100%;
+}
+
+/* Advanced Metrics */
+.advanced-metrics {
+  margin-bottom: 20px;
+  padding: 12px;
+  background-color: var(--bg-secondary);
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.metrics-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.metric-group {
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.metric-group:last-child {
+  border-bottom: none;
+}
+
+.metric-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+/* VAD Display */
+.vad-display {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.vad-dimension {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.vad-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  min-width: 70px;
+}
+
+.vad-bar {
+  flex: 1;
+  height: 8px;
+  background-color: var(--bg-hover);
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}
+
+.vad-fill {
+  height: 100%;
+  background-color: var(--primary-color);
+  transition: width 0.3s ease;
+  border-radius: 4px;
+}
+
+.vad-value {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+  min-width: 30px;
+  text-align: right;
+}
+
+.emotional-state {
+  margin-top: 8px;
+  padding: 8px;
+  background-color: var(--bg-hover);
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+/* Lexicon Scores */
+.lexicon-scores {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.lexicon-tag {
+  padding: 4px 8px;
+  background-color: var(--bg-hover);
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* Anomalies List */
+.anomalies-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.anomaly-item {
+  padding: 6px 8px;
+  background-color: var(--bg-hover);
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.anomaly-item::before {
+  content: '⚠️';
+  font-size: 12px;
+}
+
+/* Confidence Scores */
+.confidence-scores {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.confidence-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.confidence-item:last-child {
+  border-bottom: none;
+}
+
+.confidence-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.confidence-bar {
+  width: 100px;
+  height: 6px;
+  background-color: var(--bg-hover);
+  border-radius: 3px;
+  overflow: hidden;
+  margin: 0 8px;
+}
+
+.confidence-fill {
+  height: 100%;
+  background-color: var(--secondary-color);
+  transition: width 0.3s ease;
+}
+
+.confidence-value {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+}

@@ -15,13 +15,13 @@ export class AISessionManager {
    */
   async checkAvailability() {
     try {
-      // Check if the API exists
-      if (!window.ai || !window.ai.languageModel) {
+      // Check if the API exists (use self in service worker context)
+      if (!self.ai || !self.ai.languageModel) {
         console.warn('Built-in AI API not available');
         return 'unavailable';
       }
 
-      this.availability = await window.ai.languageModel.availability();
+      this.availability = await self.ai.languageModel.availability();
       return this.availability;
     } catch (error) {
       console.error('Error checking AI availability:', error);
@@ -35,11 +35,11 @@ export class AISessionManager {
    */
   async getCapabilities() {
     try {
-      if (!window.ai || !window.ai.languageModel) {
+      if (!self.ai || !self.ai.languageModel) {
         return null;
       }
 
-      const capabilities = await window.ai.languageModel.capabilities();
+      const capabilities = await self.ai.languageModel.capabilities();
       return {
         available: capabilities.available,
         defaultTemperature: capabilities.defaultTemperature,
@@ -80,7 +80,7 @@ export class AISessionManager {
       };
 
       // Create session
-      this.session = await window.ai.languageModel.create(sessionOptions);
+      this.session = await self.ai.languageModel.create(sessionOptions);
 
       console.log('AI session created successfully');
       return this.session;
@@ -140,6 +140,82 @@ export class AISessionManager {
     } catch (error) {
       console.error('Error sending prompt:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Summarize text using the Summarization API (PRIMARY)
+   * @param {string} text - Text to summarize
+   * @param {Object} options - Summary options
+   * @returns {Promise<string>} Summary
+   */
+  async summarize(text, options = {}) {
+    try {
+      // PRIMARY: Use Summarization API first
+      if (self.ai && self.ai.summarize) {
+        const summaryOptions = {
+          text,
+          maxItems: options.maxItems || 5,
+          question: options.question,
+          metadata: options.metadata,
+          ...options
+        };
+
+        console.log('📝 Using PRIMARY: Summarization API');
+        const summary = await self.ai.summarize(summaryOptions);
+        return summary;
+      }
+    } catch (error) {
+      console.warn('Summarization API failed, using fallback:', error);
+    }
+
+    // FALLBACK: Use Prompt API only if Summarization fails
+    console.log('📝 Using FALLBACK: Prompt API');
+    return await this.promptSumm(text, options);
+  }
+
+  /**
+   * Fallback: Summarize using prompt (when API not available)
+   * @param {string} text - Text to summarize
+   * @param {Object} options - Summary options
+   * @returns {Promise<string>} Summary
+   */
+  async promptSumm(text, options = {}) {
+    try {
+      const session = await this.getOrCreateSession({ temperature: 0.7, topK: 40 });
+      
+      const maxLength = options.maxLength || 150;
+      const question = options.question || '';
+      
+      let prompt = `Summarize the following content in no more than ${maxLength} words:\n\n${text}`;
+      
+      if (question) {
+        prompt = `Answer this question about the content: "${question}"\n\nContent:\n${text}\n\nProvide a concise answer (max ${maxLength} words):`;
+      }
+
+      const summary = await session.prompt(prompt);
+      return summary;
+
+    } catch (error) {
+      console.error('Error in prompt-based summarization:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get summarization capabilities
+   * @returns {Promise<Object>} Capabilities
+   */
+  async getSummarizationCapabilities() {
+    try {
+      if (!self.ai || !self.ai.summarize || !self.ai.capabilities) {
+        return null;
+      }
+
+      return await self.ai.capabilities('summarization');
+    } catch (error) {
+      console.error('Error getting summarization capabilities:', error);
+      return null;
     }
   }
 

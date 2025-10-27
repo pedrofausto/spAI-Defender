@@ -4,8 +4,16 @@
  */
 
 import { AISessionManager } from '../utils/ai-session-manager.js';
+import { PhishingDetector } from '../utils/phishing-detector.js';
+import { SentimentAnalyzer } from '../utils/sentiment-analyzer.js';
+import { PlatformDetector } from '../utils/platform-detector.js';
+import { ImageAnalyzer } from '../utils/image-analyzer.js';
 
 const aiManager = new AISessionManager();
+const phishingDetector = new PhishingDetector(aiManager);
+const sentimentAnalyzer = new SentimentAnalyzer(aiManager);
+const platformDetector = new PlatformDetector();
+const imageAnalyzer = new ImageAnalyzer(aiManager);
 
 // Extension installation and updates
 chrome.runtime.onInstalled.addListener(async (details) => {
@@ -43,6 +51,42 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       handleSummarizeContent(request.data, sendResponse);
       return true; // Async response
 
+    case 'DETECT_PHISHING':
+      handlePhishingDetection(request.data, sendResponse);
+      return true; // Async response
+
+    case 'ANALYZE_SENTIMENT':
+      handleSentimentAnalysis(request.data, sendResponse);
+      return true; // Async response
+
+    case 'ANALYZE_SENTIMENT_ADVANCED':
+      handleAdvancedSentimentAnalysis(request.data, sendResponse);
+      return true; // Async response
+
+    case 'GET_PLATFORM_INFO':
+      handleGetPlatformInfo(request.url, sendResponse);
+      return true; // Async response
+
+    case 'GET_THREAT_STATS':
+      handleGetThreatStats(sendResponse);
+      return true; // Async response
+
+    case 'SCAN_MESSAGES':
+      handleScanMessages(request.data, sendResponse);
+      return true; // Async response
+
+    case 'ANALYZE_IMAGE':
+      handleAnalyzeImage(request.data, sendResponse);
+      return true; // Async response
+
+    case 'ANALYZE_PAGE_IMAGES':
+      handleAnalyzePageImages(request.data, sendResponse);
+      return true; // Async response
+
+    case 'EXTRACT_IMAGE_TEXT':
+      handleExtractImageText(request.data, sendResponse);
+      return true; // Async response
+
     default:
       sendResponse({ error: 'Unknown message type' });
       return false;
@@ -56,11 +100,14 @@ async function handleCheckAvailability(sendResponse) {
   try {
     const availability = await aiManager.checkAvailability();
     const capabilities = await aiManager.getCapabilities();
+    const summarizationCapabilities = await aiManager.getSummarizationCapabilities();
 
     sendResponse({
       success: true,
       availability,
-      capabilities
+      capabilities,
+      summarizationCapabilities,
+      hasSummarizationAPI: summarizationCapabilities !== null
     });
   } catch (error) {
     console.error('Error checking AI availability:', error);
@@ -146,35 +193,25 @@ async function handleAnalyzeTabContent(data, sendResponse) {
 }
 
 /**
- * Summarize content using Built-in AI
+ * Summarize content using Built-in AI Summarization API (optimized)
  */
 async function handleSummarizeContent(data, sendResponse) {
   try {
     const { content, maxLength } = data;
 
-    // Create AI session with specific parameters for summarization
-    const session = await aiManager.createSession({
-      temperature: 0.7,
-      topK: 40
-    });
+    // Use the optimized Summarization API
+    const summaryOptions = {
+      text: content,
+      maxLength: maxLength || 150
+    };
 
-    if (!session) {
-      throw new Error('Failed to create AI session');
-    }
-
-    const summaryPrompt = maxLength
-      ? `Summarize the following content in no more than ${maxLength} words:\n\n${content}`
-      : `Provide a concise summary of the following content:\n\n${content}`;
-
-    const summary = await session.prompt(summaryPrompt);
+    const summary = await aiManager.summarize(content, summaryOptions);
 
     sendResponse({
       success: true,
-      summary
+      summary,
+      api: 'summarization' // Indicate which API was used
     });
-
-    // Clean up session
-    await aiManager.destroySession();
 
   } catch (error) {
     console.error('Error summarizing content:', error);
@@ -225,5 +262,227 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     // Could trigger automatic analysis here if needed
   }
 });
+
+/**
+ * Handle phishing detection (includes image analysis)
+ */
+async function handlePhishingDetection(data, sendResponse) {
+  try {
+    const { url, content, title, images = [] } = data;
+    const analysis = await phishingDetector.detectPhishing(url, content, title, images);
+    
+    // Show badge if high risk
+    if (analysis.riskScore > 50) {
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tabs[0]) {
+        chrome.tabs.sendMessage(tabs[0].id, {
+          type: 'SHOW_SECURITY_BADGE',
+          data: {
+            riskLevel: analysis.riskLevel,
+            riskScore: analysis.riskScore,
+            indicators: analysis.redFlags
+          }
+        });
+      }
+    }
+
+    sendResponse({
+      success: true,
+      analysis
+    });
+  } catch (error) {
+    console.error('Error in phishing detection:', error);
+    sendResponse({
+      success: false,
+      error: error.message
+    });
+  }
+}
+
+/**
+ * Handle sentiment analysis
+ */
+async function handleSentimentAnalysis(data, sendResponse) {
+  try {
+    const { content, url } = data;
+    const analysis = await sentimentAnalyzer.analyzeSentiment(content, url);
+    
+    sendResponse({
+      success: true,
+      analysis
+    });
+  } catch (error) {
+    console.error('Error in sentiment analysis:', error);
+    sendResponse({
+      success: false,
+      error: error.message
+    });
+  }
+}
+
+/**
+ * Handle get platform info
+ */
+async function handleGetPlatformInfo(url, sendResponse) {
+  try {
+    const platform = platformDetector.detectPlatform(url);
+    const platformInfo = platformDetector.getPlatformInfo(platform);
+    const actions = platformDetector.getPlatformActions(platform);
+    
+    sendResponse({
+      success: true,
+      platform,
+      platformInfo,
+      actions
+    });
+  } catch (error) {
+    console.error('Error getting platform info:', error);
+    sendResponse({
+      success: false,
+      error: error.message
+    });
+  }
+}
+
+/**
+ * Handle get threat stats
+ */
+async function handleGetThreatStats(sendResponse) {
+  try {
+    const stats = await phishingDetector.getThreatStats();
+    
+    sendResponse({
+      success: true,
+      stats
+    });
+  } catch (error) {
+    console.error('Error getting threat stats:', error);
+    sendResponse({
+      success: false,
+      error: error.message
+    });
+  }
+}
+
+/**
+ * Handle scan messages (WhatsApp/Telegram)
+ */
+async function handleScanMessages(data, sendResponse) {
+  try {
+    const { messages, platform } = data;
+    const results = [];
+
+    for (const message of messages.slice(0, 10)) { // Scan last 10 messages
+      const text = message.text || '';
+      const sender = message.sender || 'Unknown';
+      
+      if (text.length > 10) { // Only scan meaningful messages
+        const analysis = await phishingDetector.detectSocialEngineering(text, sender);
+        results.push({
+          message,
+          analysis
+        });
+      }
+    }
+
+    sendResponse({
+      success: true,
+      results,
+      scanned: results.length
+    });
+  } catch (error) {
+    console.error('Error scanning messages:', error);
+    sendResponse({
+      success: false,
+      error: error.message
+    });
+  }
+}
+
+/**
+ * Handle analyze single image
+ */
+async function handleAnalyzeImage(data, sendResponse) {
+  try {
+    const { imageUrl, pageContext } = data;
+    const analysis = await imageAnalyzer.analyzeImage(imageUrl, pageContext);
+    
+    sendResponse({
+      success: true,
+      analysis
+    });
+  } catch (error) {
+    console.error('Error analyzing image:', error);
+    sendResponse({
+      success: false,
+      error: error.message
+    });
+  }
+}
+
+/**
+ * Handle analyze all page images
+ */
+async function handleAnalyzePageImages(data, sendResponse) {
+  try {
+    const { imageUrls, pageContext } = data;
+    const results = await imageAnalyzer.analyzePageImages(imageUrls, pageContext);
+    
+    sendResponse({
+      success: true,
+      results
+    });
+  } catch (error) {
+    console.error('Error analyzing page images:', error);
+    sendResponse({
+      success: false,
+      error: error.message
+    });
+  }
+}
+
+/**
+ * Handle extract text from image (OCR)
+ */
+async function handleExtractImageText(data, sendResponse) {
+  try {
+    const { imageUrl } = data;
+    const extractedText = await imageAnalyzer.extractTextFromImage(imageUrl);
+    
+    sendResponse({
+      success: true,
+      text: extractedText
+    });
+  } catch (error) {
+    console.error('Error extracting image text:', error);
+    sendResponse({
+      success: false,
+      error: error.message
+    });
+  }
+}
+
+/**
+ * Handle advanced sentiment analysis with multi-stage pipeline
+ */
+async function handleAdvancedSentimentAnalysis(data, sendResponse) {
+  try {
+    const { content, url } = data;
+    
+    // Use advanced sentiment analysis
+    const analysis = await sentimentAnalyzer.analyzeAdvanced(content, url);
+    
+    sendResponse({
+      success: true,
+      analysis
+    });
+  } catch (error) {
+    console.error('Error in advanced sentiment analysis:', error);
+    sendResponse({
+      success: false,
+      error: error.message
+    });
+  }
+}
 
 console.log('spAI-Defender service worker loaded');

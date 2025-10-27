@@ -3,9 +3,12 @@
  * Injected into web pages to extract and monitor content
  */
 
+import { SecurityBadge } from './security-badge.js';
+
 // State management
 let observerActive = false;
 let contentObserver = null;
+const securityBadge = new SecurityBadge();
 
 /**
  * Initialize content script
@@ -25,6 +28,9 @@ function init() {
     url: window.location.href,
     title: document.title
   });
+
+  // Auto-analyze page when loaded
+  autoAnalyzePage();
 }
 
 /**
@@ -50,6 +56,16 @@ function handleMessage(request, sender, sendResponse) {
 
     case 'GET_PAGE_INFO':
       getPageInfo(sendResponse);
+      break;
+
+    case 'SHOW_SECURITY_BADGE':
+      showSecurityBadge(request.data);
+      sendResponse({ success: true });
+      break;
+
+    case 'HIDE_SECURITY_BADGE':
+      securityBadge.remove();
+      sendResponse({ success: true });
       break;
 
     default:
@@ -398,6 +414,152 @@ function stopContentMonitoring(sendResponse) {
   observerActive = false;
 
   sendResponse({ success: true, message: 'Content monitoring stopped' });
+}
+
+/**
+ * Show security badge with risk information
+ */
+function showSecurityBadge(data) {
+  const { riskLevel, riskScore, indicators = [] } = data;
+  securityBadge.create(riskLevel, riskScore, indicators);
+}
+
+/**
+ * Auto-analyze page for phishing threats
+ */
+async function autoAnalyzePage() {
+  try {
+    // Skip certain pages
+    if (window.location.protocol === 'chrome:' || 
+        window.location.protocol === 'chrome-extension:' ||
+        window.location.protocol === 'moz-extension:') {
+      return;
+    }
+
+    console.log('🔄 Auto-analyzing page for threats...');
+
+    // Extract page content
+    const content = {
+      url: window.location.href,
+      text: document.body.innerText,
+      title: document.title,
+      images: Array.from(document.querySelectorAll('img')).map(img => img.src)
+    };
+
+    // Request phishing detection from background
+    const response = await new Promise((resolve) => {
+      chrome.runtime.sendMessage({
+        type: 'DETECT_PHISHING',
+        data: content
+      }, resolve);
+    });
+
+    if (response && response.success && response.analysis) {
+      const analysis = response.analysis;
+      
+      // Use finalRiskScore from hybrid scoring if available, otherwise riskScore
+      const riskScore = analysis.finalRiskScore || analysis.riskScore || 0;
+      const riskLevel = analysis.riskLevel || 'UNKNOWN';
+
+      // If risk > 50: highlight suspicious text elements
+      if (riskScore > 50) {
+        highlightSuspiciousElements(analysis);
+      }
+
+      // If risk > 75: also show badge
+      if (riskScore > 75) {
+        securityBadge.create(
+          riskLevel,
+          riskScore,
+          analysis.redFlags || []
+        );
+        console.log('🚨 HIGH RISK DETECTED - Badge displayed');
+      }
+
+      console.log('✅ Auto-analysis complete. Risk:', riskLevel, `(${riskScore}/100)`);
+    }
+
+  } catch (error) {
+    console.error('Auto-analysis error:', error);
+  }
+}
+
+/**
+ * Highlight suspicious elements on page
+ */
+function highlightSuspiciousElements(analysis) {
+  const suspiciousPatterns = [
+    /act now|urgent|immediately|suspended|verify|confirm/i,
+    /password|login|account/i,
+    /click here|download now|limited time/i,
+    /\$\d+|prize|winner|congratulations/i
+  ];
+
+  // Find text nodes containing suspicious patterns
+  const walker = document.createTreeWalker(
+    document.body,
+    NodeFilter.SHOW_TEXT,
+    null,
+    false
+  );
+
+  const suspiciousElements = [];
+  let node;
+
+  while (node = walker.nextNode()) {
+    if (node.nodeType === Node.TEXT_NODE && node.textContent.trim()) {
+      for (const pattern of suspiciousPatterns) {
+        if (pattern.test(node.textContent)) {
+          // Check if it's an important element (not already highlighted)
+          const parent = node.parentElement;
+          if (parent && !parent.classList.contains('spai-highlighted')) {
+            suspiciousElements.push({
+              element: parent,
+              text: node.textContent.substring(0, 100)
+            });
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  // Highlight first 10 suspicious elements with subtle style
+  suspiciousElements.slice(0, 10).forEach((item, index) => {
+    try {
+      item.element.classList.add('spai-highlighted');
+      item.element.style.cssText += `
+        outline: 2px dashed rgba(234, 67, 53, 0.3) !important;
+        outline-offset: 2px !important;
+        position: relative !important;
+      `;
+
+      // Add subtle tooltip on hover
+      item.element.title = `⚠️ Potential phishing indicator`;
+      item.element.style.cursor = 'help';
+    } catch (e) {
+      console.warn('Could not highlight element:', e);
+    }
+  });
+
+  // Inject styles
+  if (!document.getElementById('spai-highlight-styles')) {
+    const style = document.createElement('style');
+    style.id = 'spai-highlight-styles';
+    style.textContent = `
+      .spai-highlighted {
+        transition: outline 0.3s ease !important;
+      }
+      .spai-highlighted:hover {
+        outline-color: rgba(234, 67, 53, 0.5) !important;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  if (suspiciousElements.length > 0) {
+    console.log(`🔍 Highlighted ${suspiciousElements.length} potentially suspicious elements`);
+  }
 }
 
 // Initialize when DOM is ready

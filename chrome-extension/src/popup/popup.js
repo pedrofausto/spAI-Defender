@@ -10,11 +10,19 @@ const elements = {
   tabTitle: document.getElementById('tabTitle'),
   tabUrl: document.getElementById('tabUrl'),
 
+  // Dashboard
+  riskScore: document.getElementById('riskScore'),
+  threatsCount: document.getElementById('threatsCount'),
+  pagesCount: document.getElementById('pagesCount'),
+  riskFill: document.getElementById('riskFill'),
+
   // Action buttons
   extractBtn: document.getElementById('extractBtn'),
   summarizeBtn: document.getElementById('summarizeBtn'),
   analyzeBtn: document.getElementById('analyzeBtn'),
   customPromptBtn: document.getElementById('customPromptBtn'),
+  phishingScanBtn: document.getElementById('phishingScanBtn'),
+  sentimentBtn: document.getElementById('sentimentBtn'),
 
   // Prompt section
   promptSection: document.getElementById('promptSection'),
@@ -33,13 +41,29 @@ const elements = {
   // Footer links
   settingsLink: document.getElementById('settingsLink'),
   helpLink: document.getElementById('helpLink'),
-  aboutLink: document.getElementById('aboutLink')
+  aboutLink: document.getElementById('aboutLink'),
+
+  // Advanced metrics
+  advancedMetrics: document.getElementById('advancedMetrics'),
+  closeMetricsBtn: document.getElementById('closeMetricsBtn'),
+  valenceFill: document.getElementById('valenceFill'),
+  valenceValue: document.getElementById('valenceValue'),
+  arousalFill: document.getElementById('arousalFill'),
+  arousalValue: document.getElementById('arousalValue'),
+  dominanceFill: document.getElementById('dominanceFill'),
+  dominanceValue: document.getElementById('dominanceValue'),
+  emotionalState: document.getElementById('emotionalState'),
+  lexiconScores: document.getElementById('lexiconScores'),
+  anomaliesList: document.getElementById('anomaliesList'),
+  confidenceScores: document.getElementById('confidenceScores')
 };
 
 // State
 let currentTab = null;
 let extractedContent = null;
 let aiAvailable = false;
+let currentPlatform = 'GENERIC';
+let threatStats = { total: 0, today: 0, recent: [], byRiskLevel: {} };
 
 /**
  * Initialize popup
@@ -52,6 +76,12 @@ async function init() {
 
   // Check AI availability
   await checkAIAvailability();
+
+  // Load threat stats
+  await loadThreatStats();
+
+  // Detect platform
+  detectCurrentPlatform();
 
   // Setup event listeners
   setupEventListeners();
@@ -83,15 +113,24 @@ async function checkAIAvailability() {
     const response = await sendMessage({ type: 'CHECK_AI_AVAILABILITY' });
 
     if (response.success) {
-      const { availability } = response;
+      const { availability, hasSummarizationAPI } = response;
       updateAIStatus(availability);
       aiAvailable = availability === 'readily';
+
+      // Log if using optimized Summarization API
+      if (hasSummarizationAPI) {
+        console.log('✅ Using Optimized Summarization API');
+      } else {
+        console.log('⚠️ Using Fallback Prompt API for Summarization');
+      }
 
       // Enable AI-dependent buttons
       if (aiAvailable) {
         elements.summarizeBtn.disabled = false;
         elements.analyzeBtn.disabled = false;
         elements.customPromptBtn.disabled = false;
+        elements.phishingScanBtn.disabled = false;
+        elements.sentimentBtn.disabled = false;
       }
     } else {
       updateAIStatus('unavailable');
@@ -143,6 +182,8 @@ function setupEventListeners() {
   elements.summarizeBtn.addEventListener('click', handleSummarizeContent);
   elements.analyzeBtn.addEventListener('click', handleAnalyzeContent);
   elements.customPromptBtn.addEventListener('click', showCustomPrompt);
+  elements.phishingScanBtn.addEventListener('click', handlePhishingScan);
+  elements.sentimentBtn.addEventListener('click', handleSentimentAnalysis);
 
   // Prompt actions
   elements.sendPromptBtn.addEventListener('click', handleCustomPrompt);
@@ -166,6 +207,11 @@ function setupEventListeners() {
   elements.aboutLink.addEventListener('click', (e) => {
     e.preventDefault();
     showAbout();
+  });
+
+  // Advanced metrics close button
+  elements.closeMetricsBtn.addEventListener('click', () => {
+    elements.advancedMetrics.style.display = 'none';
   });
 }
 
@@ -463,6 +509,307 @@ Built with Chrome's Prompt API and Manifest V3
   `.trim();
 
   showResults('About', aboutText);
+}
+
+/**
+ * Display advanced metrics
+ */
+function displayAdvancedMetrics(analysis) {
+  // Show metrics section
+  elements.advancedMetrics.style.display = 'block';
+
+  // Update VAD Profile
+  if (analysis.details?.sentiment) {
+    const sentiment = analysis.details.sentiment;
+    
+    // Valence (range: -1 to +1, display 0-100%)
+    const valencePercent = ((sentiment.valence + 1) / 2) * 100;
+    elements.valenceFill.style.width = `${valencePercent}%`;
+    elements.valenceValue.textContent = sentiment.valence.toFixed(2);
+
+    // Arousal (0 to 1, display as percentage)
+    const arousalPercent = sentiment.arousal * 100;
+    elements.arousalFill.style.width = `${arousalPercent}%`;
+    elements.arousalValue.textContent = sentiment.arousal.toFixed(2);
+
+    // Dominance (0 to 1, display as percentage)
+    const dominancePercent = sentiment.dominance * 100;
+    elements.dominanceFill.style.width = `${dominancePercent}%`;
+    elements.dominanceValue.textContent = sentiment.dominance.toFixed(2);
+
+    // Emotional state
+    if (sentiment.emotionalState) {
+      elements.emotionalState.textContent = `Emotional State: ${sentiment.emotionalState}`;
+    }
+  }
+
+  // Update lexicon scores
+  if (analysis.originalAnalysis?.sentiment?.dominantLexicons) {
+    const lexicons = analysis.originalAnalysis.sentiment.dominantLexicons;
+    const explanations = {
+      urgency: 'Uses time pressure',
+      authority: 'Claims authority',
+      fear: 'Creates fear',
+      reward: 'Offers rewards',
+      action: 'Demands action',
+      credential: 'Requests credentials',
+      trust: 'False trust markers'
+    };
+
+    elements.lexiconScores.innerHTML = lexicons.map(lex => 
+      `<span class="lexicon-tag">${explanations[lex] || lex}</span>`
+    ).join('');
+  }
+
+  // Update linguistic anomalies
+  if (analysis.originalAnalysis?.sentiment?.linguisticFeatures?.anomalies) {
+    const anomalies = analysis.originalAnalysis.sentiment.linguisticFeatures.anomalies;
+    elements.anomaliesList.innerHTML = anomalies.map(anomaly => 
+      `<div class="anomaly-item">${anomaly}</div>`
+    ).join('');
+  }
+
+  // Update confidence breakdown
+  if (analysis.breakdown) {
+    const breakdown = analysis.breakdown;
+    elements.confidenceScores.innerHTML = `
+      <div class="confidence-item">
+        <span class="confidence-label">Sentiment</span>
+        <div class="confidence-bar"><div class="confidence-fill" style="width: ${breakdown.sentiment}%"></div></div>
+        <span class="confidence-value">${breakdown.sentiment}%</span>
+      </div>
+      <div class="confidence-item">
+        <span class="confidence-label">Phishing</span>
+        <div class="confidence-bar"><div class="confidence-fill" style="width: ${breakdown.phishing}%"></div></div>
+        <span class="confidence-value">${breakdown.phishing}%</span>
+      </div>
+      <div class="confidence-item">
+        <span class="confidence-label">Image</span>
+        <div class="confidence-bar"><div class="confidence-fill" style="width: ${breakdown.image}%"></div></div>
+        <span class="confidence-value">${breakdown.image}%</span>
+      </div>
+      <div class="confidence-item">
+        <span class="confidence-label">Linguistic</span>
+        <div class="confidence-bar"><div class="confidence-fill" style="width: ${breakdown.linguistic}%"></div></div>
+        <span class="confidence-value">${breakdown.linguistic}%</span>
+      </div>
+    `;
+  }
+}
+
+/**
+ * Load threat statistics
+ */
+async function loadThreatStats() {
+  try {
+    const response = await sendMessage({ type: 'GET_THREAT_STATS' });
+    if (response.success) {
+      threatStats = response.stats;
+      updateDashboard();
+    }
+  } catch (error) {
+    console.error('Error loading threat stats:', error);
+  }
+}
+
+/**
+ * Update dashboard with current stats
+ */
+function updateDashboard() {
+  elements.threatsCount.textContent = threatStats.today || 0;
+  elements.pagesCount.textContent = threatStats.total || 0;
+  
+  // Update risk level based on recent threats
+  const recentHighRisk = threatStats.recent.filter(t => 
+    ['HIGH', 'CRITICAL'].includes(t.riskLevel)
+  ).length;
+  
+  if (recentHighRisk > 0) {
+    elements.riskScore.textContent = 'HIGH';
+    elements.riskFill.className = 'risk-fill high';
+  } else if (threatStats.total > 0) {
+    elements.riskScore.textContent = 'MEDIUM';
+    elements.riskFill.className = 'risk-fill medium';
+  } else {
+    elements.riskScore.textContent = 'LOW';
+    elements.riskFill.className = 'risk-fill low';
+  }
+}
+
+/**
+ * Detect current platform
+ */
+async function detectCurrentPlatform() {
+  try {
+    const response = await sendMessage({
+      type: 'GET_PLATFORM_INFO',
+      url: currentTab.url
+    });
+    
+    if (response.success) {
+      currentPlatform = response.platform;
+      console.log('Platform detected:', currentPlatform);
+    }
+  } catch (error) {
+    console.error('Error detecting platform:', error);
+  }
+}
+
+/**
+ * Handle phishing scan
+ */
+async function handlePhishingScan() {
+  if (!extractedContent) {
+    showError('Please extract content first');
+    return;
+  }
+
+  showLoading();
+
+  try {
+    // Extract image URLs from content
+    const images = extractedContent.images ? 
+      extractedContent.images.map(img => img.src || img).filter(Boolean) : 
+      [];
+
+    const response = await sendMessage({
+      type: 'DETECT_PHISHING',
+      data: {
+        url: extractedContent.url,
+        content: extractedContent.text,
+        title: extractedContent.title,
+        images: images
+      }
+    });
+
+    if (response.success) {
+      const analysis = response.analysis;
+      
+      // Update dashboard
+      const finalScore = analysis.finalRiskScore || analysis.riskScore || 0;
+      const riskLevel = analysis.riskLevel || analysis.riskLevel;
+      elements.riskScore.textContent = riskLevel;
+      elements.pagesCount.textContent = (threatStats.total || 0) + 1;
+      
+      // Update risk fill based on risk level
+      const riskClass = riskLevel.toLowerCase();
+      elements.riskFill.className = `risk-fill ${riskClass}`;
+      
+      // Show advanced metrics if available
+      if (analysis.details || analysis.breakdown) {
+        displayAdvancedMetrics(analysis);
+      }
+      
+      // Show results
+      let resultText = `
+<strong>Phishing Analysis Result:</strong>
+
+🚨 <strong>Risk Level:</strong> ${riskLevel} (${finalScore}/100)
+🎯 <strong>Phishing Detected:</strong> ${analysis.isPhishing ? 'YES' : 'NO'}
+${analysis.recommendation ? `
+📋 <strong>Recommendation:</strong> ${analysis.recommendation.action || analysis.recommendation}
+` : ''}
+${analysis.dominantFactors && analysis.dominantFactors.length > 0 ? `
+🔍 <strong>Dominant Factors:</strong> ${analysis.dominantFactors.join(', ')}
+` : ''}
+${analysis.redFlags && analysis.redFlags.length > 0 ? `
+⚠️ <strong>Red Flags:</strong>
+${analysis.redFlags.map(flag => `• ${flag}`).join('\n')}
+` : ''}
+      `.trim();
+
+      // Add image analysis results if available
+      if (analysis.imageAnalysis) {
+        resultText += `\n\n🖼️ <strong>Image Analysis:</strong>
+• Total Images: ${analysis.imageAnalysis.totalImages}
+• Analyzed: ${analysis.imageAnalysis.analyzedImages}
+• Malicious: ${analysis.imageAnalysis.maliciousCount}
+• Max Risk: ${analysis.imageAnalysis.maxRiskLevel}`;
+      }
+      
+      showResults('Phishing Scan Results', resultText);
+      
+      // Reload stats
+      await loadThreatStats();
+    } else {
+      showError(response.error || 'Failed to scan for phishing');
+    }
+  } catch (error) {
+    console.error('Error in phishing scan:', error);
+    showError('Failed to scan for phishing');
+  } finally {
+    hideLoading();
+  }
+}
+
+/**
+ * Handle sentiment analysis
+ */
+async function handleSentimentAnalysis() {
+  if (!extractedContent) {
+    showError('Please extract content first');
+    return;
+  }
+
+  showLoading();
+
+  try {
+    const response = await sendMessage({
+      type: 'ANALYZE_SENTIMENT',
+      data: {
+        content: extractedContent.text,
+        url: extractedContent.url
+      }
+    });
+
+    if (response.success) {
+      const analysis = response.analysis;
+      
+      let resultText = `
+<strong>Sentiment Analysis Result:</strong>
+
+😊 <strong>Sentiment:</strong> ${analysis.sentiment || analysis.sentimentScore ? analysis.sentiment : 'NEUTRAL'} 
+⚡ <strong>Urgency Level:</strong> ${analysis.urgencyLevel || 'N/A'}
+${analysis.manipulationDetected || analysis.manipulationScore > 0.3 ? 
+  '⚠️ <strong>Manipulation Detected:</strong> YES' : 
+  '✅ <strong>Manipulation Detected:</strong> NO'}
+${analysis.emotionalTriggers && analysis.emotionalTriggers.length > 0 ? `
+🎭 <strong>Emotional Triggers:</strong>
+${analysis.emotionalTriggers.map(trigger => `• ${trigger}`).join('\n')}
+` : ''}
+🛡️ <strong>Trustworthiness:</strong> ${analysis.trustworthiness || 'UNKNOWN'}
+📊 <strong>Recommendation:</strong> ${analysis.recommendation || 'SAFE'}
+      `.trim();
+
+      // Show VAD profile if available
+      if (analysis.valence !== undefined || analysis.arousal !== undefined) {
+        resultText += `\n\n<strong>Emotional Profile (VAD):</strong>
+• <strong>Valence:</strong> ${analysis.valence?.toFixed(2) || 0} (negative to positive)
+• <strong>Arousal:</strong> ${analysis.arousal?.toFixed(2) || 0} (calm to urgent)
+• <strong>Dominance:</strong> ${analysis.dominance?.toFixed(2) || 0.5} (powerless to empowered)
+${analysis.emotionalState ? `• <strong>State:</strong> ${analysis.emotionalState}` : ''}`;
+      }
+      
+      showResults('Sentiment Analysis', resultText);
+    } else {
+      showError(response.error || 'Failed to analyze sentiment');
+    }
+  } catch (error) {
+    console.error('Error in sentiment analysis:', error);
+    showError('Failed to analyze sentiment');
+  } finally {
+    hideLoading();
+  }
+}
+
+/**
+ * Update dashboard on content extraction
+ */
+function updateDashboardOnExtract() {
+  if (elements.pagesCount) {
+    const currentCount = parseInt(elements.pagesCount.textContent) || 0;
+    elements.pagesCount.textContent = currentCount + 1;
+  }
 }
 
 // Initialize popup when DOM is loaded
