@@ -20,6 +20,12 @@ export class SentimentAnalyzer {
    */
   async analyzeSentiment(text, url = '') {
     try {
+      // Validate input
+      if (!text || typeof text !== 'string') {
+        console.warn('Invalid text provided to analyzeSentiment');
+        return this.getDefaultAnalysis();
+      }
+
       const prompt = `Analyze the sentiment, urgency, and manipulation in this content:
 
 Content: ${text.substring(0, 3000)}
@@ -47,13 +53,25 @@ Provide JSON response:
       const session = await this.aiManager.createSession({ temperature: 0.5 });
       const response = await session.prompt(prompt);
       
+      console.log('Raw AI response for sentiment:', response);
+      
       // Parse JSON
       const jsonMatch = response.match(/\{[\s\S]*\}/);
       let analysis = null;
       
       if (jsonMatch) {
-        analysis = JSON.parse(jsonMatch[0]);
+        try {
+          const jsonStr = jsonMatch[0];
+          // Fix common JSON issues
+          const fixedJson = jsonStr.replace(/,(\s*[}\]])/g, '$1');
+          analysis = JSON.parse(fixedJson);
+          console.log('✅ Successfully parsed sentiment JSON');
+        } catch (jsonError) {
+          console.warn('Failed to parse JSON in analyzeSentiment:', jsonError.message);
+          analysis = this.parseSentimentText(response);
+        }
       } else {
+        console.log('No JSON found in response, using fallback parser');
         analysis = this.parseSentimentText(response);
       }
 
@@ -120,6 +138,12 @@ Provide JSON response:
    */
   async analyzeAdvanced(text, url = '') {
     try {
+      // Validate input
+      if (!text || typeof text !== 'string') {
+        console.warn('Invalid text provided to analyzeAdvanced');
+        return this.getDefaultAnalysis();
+      }
+
       // Stage 1: Lexicon-based scoring
       const lexiconResults = this.lexicons.calculateLexiconScores(text);
 
@@ -174,6 +198,12 @@ Provide JSON response:
    */
   async analyzeWithAI(text, url) {
     try {
+      // Validate input
+      if (!text || typeof text !== 'string') {
+        console.warn('Invalid text provided to analyzeWithAI');
+        return null;
+      }
+
       const prompt = `Analyze the sentiment and manipulation tactics in this content:
 
 URL: ${url}
@@ -199,12 +229,31 @@ Provide JSON response:
       const session = await this.aiManager.createSession({ temperature: 0.5 });
       const response = await session.prompt(prompt);
 
-      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      console.log('Raw AI response:', response);
+
       let analysis = null;
 
+      // Try to extract and parse JSON
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
-        analysis = JSON.parse(jsonMatch[0]);
+        try {
+          const jsonStr = jsonMatch[0];
+          console.log('Attempting to parse JSON:', jsonStr.substring(0, 200));
+          
+          // Try to fix common JSON issues
+          let fixedJson = jsonStr;
+          // Remove trailing commas before closing brackets/braces
+          fixedJson = fixedJson.replace(/,(\s*[}\]])/g, '$1');
+          
+          analysis = JSON.parse(fixedJson);
+          console.log('✅ Successfully parsed JSON');
+        } catch (jsonError) {
+          console.warn('Failed to parse JSON, trying fallback parser:', jsonError.message);
+          console.log('Problematic JSON:', jsonMatch[0].substring(0, 300));
+          analysis = this.parseSentimentText(response);
+        }
       } else {
+        console.log('No JSON found in response, using fallback parser');
         analysis = this.parseSentimentText(response);
       }
 
@@ -212,7 +261,8 @@ Provide JSON response:
       return analysis;
 
     } catch (error) {
-      console.error('Error in AI analysis:', error);
+      console.error('Error in AI analysis:', error.message);
+      await this.aiManager.destroySession().catch(() => {});
       return {
         semanticScore: 0,
         manipulationTechniques: [],

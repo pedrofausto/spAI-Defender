@@ -7,6 +7,8 @@ export class PhishingLexicons {
   constructor() {
     this.lexicons = this.initializeLexicons();
     this.cache = new Map();
+    this.cacheMaxSize = 100;
+    this.cacheTimeout = 5 * 60 * 1000; // 5 minutes
   }
 
   /**
@@ -201,8 +203,9 @@ export class PhishingLexicons {
    */
   calculateLexiconScores(text) {
     const cacheKey = text.substring(0, 100);
-    if (this.cache.has(cacheKey)) {
-      return this.cache.get(cacheKey);
+    const cached = this._getFromCache(cacheKey);
+    if (cached) {
+      return cached;
     }
 
     const normalizedText = text.toLowerCase();
@@ -234,21 +237,21 @@ export class PhishingLexicons {
       for (const [term, weight] of Object.entries(lexicon)) {
         const regex = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
         const found = regex.test(normalizedText);
-        
+
         if (found) {
           maxScore = Math.max(maxScore, weight);
           matches[lexiconName].push({ term, weight });
         }
       }
-      
+
       scores[lexiconName] = maxScore;
     }
 
     // Calculate trust manipulation (high trust words in suspicious context)
-    const trustScore = scores.credential > 0 || scores.action > 0 
-      ? this.calculateTrustManipulation(normalizedText) 
+    const trustScore = scores.credential > 0 || scores.action > 0
+      ? this.calculateTrustManipulation(normalizedText)
       : 0;
-    
+
     scores.trust = trustScore;
 
     // Calculate overall phishing score from lexicon
@@ -267,7 +270,7 @@ export class PhishingLexicons {
       dominantLexicons: this.getDominantLexicons(scores)
     };
 
-    this.cache.set(cacheKey, result);
+    this._manageCache(cacheKey, result);
     return result;
   }
 
@@ -327,6 +330,35 @@ export class PhishingLexicons {
    */
   clearCache() {
     this.cache.clear();
+  }
+
+  /**
+   * Manage cache size
+   * @private
+   */
+  _manageCache(key, value) {
+    if (this.cache.size >= this.cacheMaxSize) {
+      const firstKey = this.cache.keys().next().value;
+      this.cache.delete(firstKey);
+    }
+    this.cache.set(key, {
+      value,
+      timestamp: Date.now()
+    });
+  }
+
+  /**
+   * Get from cache with expiration
+   * @private
+   */
+  _getFromCache(key) {
+    const cached = this.cache.get(key);
+    if (!cached) return null;
+    if (Date.now() - cached.timestamp > this.cacheTimeout) {
+      this.cache.delete(key);
+      return null;
+    }
+    return cached.value;
   }
 }
 

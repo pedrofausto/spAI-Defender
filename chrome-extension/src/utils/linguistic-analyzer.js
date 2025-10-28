@@ -6,6 +6,8 @@
 export class LinguisticAnalyzer {
   constructor() {
     this.cache = new Map();
+    this.cacheMaxSize = 100; // Limit cache size
+    this.cacheTimeout = 5 * 60 * 1000; // 5 minutes
   }
 
   /**
@@ -15,8 +17,9 @@ export class LinguisticAnalyzer {
    */
   analyze(text) {
     const cacheKey = text.substring(0, 100);
-    if (this.cache.has(cacheKey)) {
-      return this.cache.get(cacheKey);
+    const cached = this._getFromCache(cacheKey);
+    if (cached) {
+      return cached;
     }
 
     const tokens = this.tokenize(text);
@@ -34,7 +37,7 @@ export class LinguisticAnalyzer {
     // Calculate overall linguistic anomaly score
     features.overall = this.calculateAnomalyScore(features);
 
-    this.cache.set(cacheKey, features);
+    this._manageCache(cacheKey, features);
     return features;
   }
 
@@ -337,6 +340,41 @@ export class LinguisticAnalyzer {
    */
   clearCache() {
     this.cache.clear();
+  }
+
+  /**
+   * Manage cache size to prevent memory leaks
+   * @private
+   */
+  _manageCache(key, value) {
+    // If cache is too large, remove oldest entries
+    if (this.cache.size >= this.cacheMaxSize) {
+      const firstKey = this.cache.keys().next().value;
+      this.cache.delete(firstKey);
+    }
+
+    // Set with timestamp for expiration
+    this.cache.set(key, {
+      value,
+      timestamp: Date.now()
+    });
+  }
+
+  /**
+   * Get from cache with expiration check
+   * @private
+   */
+  _getFromCache(key) {
+    const cached = this.cache.get(key);
+    if (!cached) return null;
+
+    // Check if expired
+    if (Date.now() - cached.timestamp > this.cacheTimeout) {
+      this.cache.delete(key);
+      return null;
+    }
+
+    return cached.value;
   }
 }
 

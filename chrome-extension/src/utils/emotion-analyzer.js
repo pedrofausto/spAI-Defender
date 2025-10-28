@@ -7,6 +7,8 @@ export class EmotionAnalyzer {
   constructor() {
     this.vadLexicon = this.initializeVADLexicon();
     this.cache = new Map();
+    this.cacheMaxSize = 100;
+    this.cacheTimeout = 5 * 60 * 1000; // 5 minutes
   }
 
   /**
@@ -92,12 +94,13 @@ export class EmotionAnalyzer {
    */
   analyze(text, lexiconScores = {}) {
     const cacheKey = text.substring(0, 100);
-    if (this.cache.has(cacheKey)) {
-      return this.cache.get(cacheKey);
+    const cached = this._getFromCache(cacheKey);
+    if (cached) {
+      return cached;
     }
 
     const normalizedText = text.toLowerCase();
-    
+
     let valenceSum = 0;
     let arousalSum = 0;
     let dominanceSum = 0;
@@ -145,7 +148,7 @@ export class EmotionAnalyzer {
       riskAssessment: this.assessRisk(valence, arousal, dominance)
     };
 
-    this.cache.set(cacheKey, result);
+    this._manageCache(cacheKey, result);
     return result;
   }
 
@@ -320,6 +323,35 @@ export class EmotionAnalyzer {
    */
   clearCache() {
     this.cache.clear();
+  }
+
+  /**
+   * Manage cache size
+   * @private
+   */
+  _manageCache(key, value) {
+    if (this.cache.size >= this.cacheMaxSize) {
+      const firstKey = this.cache.keys().next().value;
+      this.cache.delete(firstKey);
+    }
+    this.cache.set(key, {
+      value,
+      timestamp: Date.now()
+    });
+  }
+
+  /**
+   * Get from cache with expiration
+   * @private
+   */
+  _getFromCache(key) {
+    const cached = this.cache.get(key);
+    if (!cached) return null;
+    if (Date.now() - cached.timestamp > this.cacheTimeout) {
+      this.cache.delete(key);
+      return null;
+    }
+    return cached.value;
   }
 }
 

@@ -18,17 +18,29 @@ export class ImageAnalyzer {
     try {
       console.log('🔍 Analyzing image for phishing threats:', imageUrl);
 
+      // Validate URL
+      if (!imageUrl || typeof imageUrl !== 'string') {
+        throw new Error('Invalid image URL');
+      }
+
       // Use Chrome Built-in AI Visual Analysis if available
-      if (window.ai && window.ai.sources) {
+      // Note: NEW API - LanguageModel directly on self
+      if (typeof self.LanguageModel !== 'undefined') {
         try {
-          return await this.analyzeWithVisualAPI(imageUrl, pageContext);
+          return await this.analyzeWithPrompt(imageUrl, pageContext);
         } catch (error) {
-          console.warn('Visual API failed, using fallback:', error);
+          console.warn('AI analysis failed:', error);
         }
       }
 
-      // Fallback: Use prompt-based image analysis
-      return await this.analyzeWithPrompt(imageUrl, pageContext);
+      // Fallback: Return safe default
+      return {
+        isMalicious: false,
+        riskScore: 0,
+        riskLevel: 'LOW',
+        description: 'Image analysis not available (AI not supported)',
+        analyzed: false
+      };
 
     } catch (error) {
       console.error('Error analyzing image:', error);
@@ -43,60 +55,9 @@ export class ImageAnalyzer {
   }
 
   /**
-   * Analisa usando Visual API (PRIMARY)
-   * @param {string} imageUrl - URL da imagem
-   * @param {string} pageContext - Contexto da página
-   * @returns {Promise<Object>} Análise
-   */
-  async analyzeWithVisualAPI(imageUrl, pageContext) {
-    try {
-      const prompt = `Analyze this image for phishing threats:
-
-Context: ${pageContext}
-
-Check for:
-1. Suspicious logos (fake bank, fake company)
-2. Urgency text (act now, account suspended)
-3. Credential request forms
-4. Suspicious links or phone numbers
-5. Fake security badges
-6. Clone websites of legitimate services
-
-Provide JSON analysis:
-{
-  "isMalicious": true/false,
-  "riskScore": 0-100,
-  "riskLevel": "LOW|MEDIUM|HIGH|CRITICAL",
-  "threats": ["threat1", "threat2"],
-  "description": "brief description",
-  "recommendation": "TRUST|CAUTION|AVOID|DELETE",
-  "textExtracted": "any text found in image",
-  "suspiciousElements": ["element1", "element2"]
-}`;
-
-      // Use ai.sources for image analysis (experimental API)
-      // This is the proper way to analyze images with Chrome Built-in AI
-      const sources = await window.ai.sources({
-        prompt,
-        sources: [
-          {
-            url: imageUrl,
-            mimeType: 'image/jpeg' // or detect automatically
-          }
-        ]
-      });
-
-      const analysis = this.parseAnalysisResponse(sources);
-      return analysis;
-
-    } catch (error) {
-      console.error('Visual API error:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Analisa usando Prompt API (FALLBACK)
+   * Analyze using Prompt API with image context description
+   * Note: Chrome Built-in AI doesn't support direct image input yet
+   * This is a text-based analysis using URL and context
    * @param {string} imageUrl - URL da imagem
    * @param {string} pageContext - Contexto da página
    * @returns {Promise<Object>} Análise
@@ -105,18 +66,16 @@ Provide JSON analysis:
     try {
       const session = await this.aiManager.createSession({ temperature: 0.3 });
 
-      const prompt = `You are a security expert analyzing an image for phishing threats.
+      const prompt = `You are a security expert analyzing a potential phishing image based on its URL and page context.
 
 Image URL: ${imageUrl}
 Page Context: ${pageContext}
 
-Analyze the image for:
-1. Fake logos or branding
-2. Urgency language or threats
-3. Credential request forms
-4. Suspicious links or contact info
-5. Clone websites
-6. Fake security indicators
+Analyze the image URL and context for phishing indicators:
+1. URL pattern analysis (suspicious domains, typosquatting)
+2. Common phishing image naming patterns
+3. Context-based risk assessment
+4. Known phishing CDN patterns
 
 Provide JSON response:
 {
@@ -139,6 +98,7 @@ Provide JSON response:
       throw error;
     }
   }
+
 
   /**
    * Analisa todas as imagens de uma página
@@ -197,22 +157,17 @@ Provide JSON response:
   }
 
   /**
-   * Extrai texto de uma imagem (OCR)
+   * Extract text from image (OCR simulation via AI)
+   * Note: Chrome Built-in AI doesn't support direct OCR yet
+   * This is a placeholder that returns null
    * @param {string} imageUrl - URL da imagem
    * @returns {Promise<string>} Texto extraído
    */
   async extractTextFromImage(imageUrl) {
     try {
-      if (window.ai && window.ai.sources) {
-        // Use AI to extract text from image
-        const result = await window.ai.sources({
-          prompt: 'Extract all text from this image, including URLs, phone numbers, and any visible text.',
-          sources: [{ url: imageUrl, mimeType: 'image/jpeg' }]
-        });
-
-        return this.extractTextFromResponse(result);
-      }
-
+      // OCR is not supported by Chrome Built-in AI yet
+      // Would require a different API or service
+      console.warn('OCR not supported by Chrome Built-in AI');
       return null;
     } catch (error) {
       console.error('OCR extraction error:', error);

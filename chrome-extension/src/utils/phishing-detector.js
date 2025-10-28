@@ -4,6 +4,8 @@
  */
 
 import { HybridScorer } from './hybrid-scorer.js';
+import { SentimentAnalyzer } from './sentiment-analyzer.js';
+import { LinguisticAnalyzer } from './linguistic-analyzer.js';
 
 export class PhishingDetector {
   constructor(aiManager) {
@@ -19,7 +21,7 @@ export class PhishingDetector {
    */
   async detectPhishing(url, content, title = '', images = [], useAdvanced = true) {
     try {
-      // Use advanced detection if requested
+      // Use advanced detection if requested and available
       if (useAdvanced) {
         try {
           return await this.detectPhishingAdvanced(url, content, title, images);
@@ -29,34 +31,43 @@ export class PhishingDetector {
         }
       }
 
-      // Fall back to simple detection
-      // Import image analyzer dynamically if needed
-      const { ImageAnalyzer } = await import('./image-analyzer.js');
-      const imageAnalyzer = new ImageAnalyzer(this.aiManager);
+      // Fall back to simple detection (reuse the helper method)
+      return await this._detectPhishingSimple(url, content, title, images);
 
-      // Analyze images if provided
-      let imageAnalysis = null;
-      if (images && images.length > 0) {
-        try {
-          console.log('🖼️ Analyzing images for phishing threats...');
-          const imageResults = await imageAnalyzer.analyzePageImages(images, url);
-          imageAnalysis = imageResults;
-          
-          // Add image threats to overall analysis
-          if (imageResults.maxRiskLevel !== 'LOW' || imageResults.maliciousCount > 0) {
-            console.warn('⚠️ Malicious images detected:', imageResults.maliciousCount);
-          }
-        } catch (error) {
-          console.warn('Could not analyze images:', error);
-        }
-      }
+    } catch (error) {
+      console.error('Error in phishing detection:', error);
+      return {
+        riskScore: 0,
+        riskLevel: 'UNKNOWN',
+        isPhishing: false,
+        error: error.message
+      };
+    }
+  }
 
-      const prompt = `You are a cybersecurity expert. Analyze this for phishing attempts:
+  /**
+   * Simple phishing detection (shared helper method)
+   * @private
+   */
+  async _detectPhishingSimple(url, content, title = '', images = []) {
+    // Validate input
+    if (!content || typeof content !== 'string') {
+      console.warn('Invalid content provided to _detectPhishingSimple');
+      return {
+        riskScore: 0,
+        riskLevel: 'UNKNOWN',
+        isPhishing: false,
+        redFlags: ['Invalid content provided'],
+        confidence: 0,
+        error: 'Invalid content'
+      };
+    }
 
-URL: ${url}
-Title: ${title}
+    const prompt = `You are a cybersecurity expert. Analyze this for phishing attempts:
+
+URL: ${url || 'unknown'}
+Title: ${title || 'untitled'}
 Content Preview: ${content.substring(0, 2000)}
-${imageAnalysis ? `\nImages Analysis: ${imageAnalysis.maliciousCount} malicious images found. Max risk: ${imageAnalysis.maxRiskLevel}` : ''}
 
 Analyze for:
 1. URL anomalies (typo-squatting, suspicious domains)
@@ -78,45 +89,41 @@ Provide response as JSON with:
     "credentialRequests": true/false,
     "urlAnomaly": true/false,
     "suspiciousForms": true/false
-  }
+  },
+  "suspiciousPhrases": ["exact problematic phrases or sentences"]
 }`;
 
-      const session = await this.aiManager.createSession({ temperature: 0.3 });
-      const response = await session.prompt(prompt);
-      
-      // Parse JSON from response
-      const jsonMatch = response.match(/\{[\s\S]*\}/);
-      let analysis = null;
-      
-      if (jsonMatch) {
-        analysis = JSON.parse(jsonMatch[0]);
-      } else {
-        // Fallback parsing
+    const session = await this.aiManager.createSession({ temperature: 0.3 });
+    const response = await session.prompt(prompt);
+
+    // Parse JSON from response
+    const jsonMatch = response.match(/\{[\s\S]*\}/);
+    let analysis = null;
+
+    if (jsonMatch) {
+      try {
+        const jsonStr = jsonMatch[0];
+        // Fix common JSON issues (trailing commas)
+        const fixedJson = jsonStr.replace(/,(\s*[}\]])/g, '$1');
+        analysis = JSON.parse(fixedJson);
+      } catch (jsonError) {
+        console.warn('Failed to parse JSON in phishing detector:', jsonError.message);
         analysis = this.parseTextResponse(response);
       }
+    } else {
+      // Fallback parsing
+      analysis = this.parseTextResponse(response);
+    }
 
-      await this.aiManager.destroySession();
+    await this.aiManager.destroySession();
 
-      // Enhance analysis with image results
-      if (imageAnalysis) {
-        analysis.imageAnalysis = imageAnalysis;
-        analysis.hasImageThreats = imageAnalysis.maliciousCount > 0;
-        analysis.maxImageRisk = imageAnalysis.maxRiskLevel;
-        
-        // Increase risk score if images are suspicious
-        if (imageAnalysis.maxRiskLevel === 'HIGH' || imageAnalysis.maxRiskLevel === 'CRITICAL') {
-          analysis.riskScore = Math.min(100, analysis.riskScore + 20);
-          analysis.redFlags.push(`Malicious images detected (${imageAnalysis.maliciousCount} images)`);
-        }
-      }
+    // Track threats
+    if (analysis.isPhishing || analysis.riskScore > 70) {
+      this.threatsToday++;
+      this.trackThreat(url, analysis);
+    }
 
-      // Track threats
-      if (analysis.isPhishing || analysis.riskScore > 70) {
-        this.threatsToday++;
-        this.trackThreat(url, analysis);
-      }
-
-      return analysis;
+    return analysis;
   }
 
   /**
@@ -125,36 +132,33 @@ Provide response as JSON with:
    */
   async detectPhishingAdvanced(url, content, title = '', images = []) {
     try {
+      // Validate input
+      if (!content || typeof content !== 'string') {
+        console.warn('Invalid content provided to detectPhishingAdvanced');
+        return {
+          finalRiskScore: 0,
+          riskLevel: 'UNKNOWN',
+          isPhishing: false,
+          redFlags: ['Invalid content provided'],
+          confidence: 0,
+          error: 'Invalid content'
+        };
+      }
+
       console.log('🔬 Starting advanced phishing detection with hybrid scoring...');
 
       // Step 1: Get sentiment analysis
-      const { SentimentAnalyzer } = await import('./sentiment-analyzer.js');
       const sentimentAnalyzer = new SentimentAnalyzer(this.aiManager);
       const sentimentAnalysis = await sentimentAnalyzer.analyzeAdvanced(content, url);
 
-      // Step 2: Get traditional phishing analysis
-      const phishingAnalysis = await this.detectPhishing(url, content, title, images);
+      // Step 2: Get traditional phishing analysis (use fallback to avoid recursion)
+      const phishingAnalysis = await this.detectPhishingFallback(url, content, title, images);
 
-      // Step 3: Analyze images
-      let imageAnalysis = null;
-      if (images && images.length > 0) {
-        const { ImageAnalyzer } = await import('./image-analyzer.js');
-        const imageAnalyzer = new ImageAnalyzer(this.aiManager);
-        try {
-          imageAnalysis = await imageAnalyzer.analyzePageImages(images, url);
-          imageAnalysis.riskScore = imageAnalysis.maliciousCount > 0 ? 
-            (imageAnalysis.maliciousCount * 10) : 0;
-        } catch (error) {
-          console.warn('Could not analyze images:', error);
-        }
-      }
-
-      // Step 4: Get linguistic features
-      const { LinguisticAnalyzer } = await import('./linguistic-analyzer.js');
+      // Step 3: Get linguistic features
       const linguisticAnalyzer = new LinguisticAnalyzer();
       const linguisticFeatures = linguisticAnalyzer.analyze(content);
 
-      // Step 5: Use hybrid scorer to combine all analyses
+      // Step 4: Use hybrid scorer to combine all analyses (image analysis disabled)
       const hybridScore = this.hybridScorer.calculateHybridScore({
         sentimentAnalysis,
         phishingAnalysis: {
@@ -164,7 +168,7 @@ Provide response as JSON with:
           redFlags: phishingAnalysis.redFlags,
           indicators: phishingAnalysis.indicators
         },
-        imageAnalysis: imageAnalysis || {},
+        imageAnalysis: {}, // Disabled for performance
         linguisticFeatures
       });
 
@@ -174,7 +178,6 @@ Provide response as JSON with:
         originalAnalysis: {
           phishing: phishingAnalysis,
           sentiment: sentimentAnalysis,
-          image: imageAnalysis,
           linguistic: linguisticFeatures
         }
       };
@@ -191,107 +194,11 @@ Provide response as JSON with:
   }
 
   /**
-   * Simplified version for backward compatibility
+   * Simplified fallback version (backward compatibility wrapper)
+   * Just calls the shared simple detection method
    */
   async detectPhishingFallback(url, content, title = '', images = []) {
-    try {
-      // Import image analyzer dynamically if needed
-      const { ImageAnalyzer } = await import('./image-analyzer.js');
-      const imageAnalyzer = new ImageAnalyzer(this.aiManager);
-
-      // Analyze images if provided
-      let imageAnalysis = null;
-      if (images && images.length > 0) {
-        try {
-          console.log('🖼️ Analyzing images for phishing threats...');
-          const imageResults = await imageAnalyzer.analyzePageImages(images, url);
-          imageAnalysis = imageResults;
-          
-          // Add image threats to overall analysis
-          if (imageResults.maxRiskLevel !== 'LOW' || imageResults.maliciousCount > 0) {
-            console.warn('⚠️ Malicious images detected:', imageResults.maliciousCount);
-          }
-        } catch (error) {
-          console.warn('Could not analyze images:', error);
-        }
-      }
-
-      const prompt = `You are a cybersecurity expert. Analyze this for phishing attempts:
-
-URL: ${url}
-Title: ${title}
-Content Preview: ${content.substring(0, 2000)}
-${imageAnalysis ? `\nImages Analysis: ${imageAnalysis.maliciousCount} malicious images found. Max risk: ${imageAnalysis.maxRiskLevel}` : ''}
-
-Analyze for:
-1. URL anomalies (typo-squatting, suspicious domains)
-2. Urgency/panic language (act now, account suspended, limited time)
-3. Suspicious forms or credential requests
-4. Mismatch between URL and content
-5. Social engineering tactics
-
-Provide response as JSON with:
-{
-  "riskScore": 0-100,
-  "riskLevel": "LOW|MEDIUM|MEDIUM_HIGH|HIGH|CRITICAL",
-  "isPhishing": true/false,
-  "redFlags": ["reason1", "reason2"],
-  "confidence": 0-100,
-  "recommendation": "SAFE|CAUTION|WARNING|DANGEROUS",
-  "indicators": {
-    "urgencyLanguage": true/false,
-    "credentialRequests": true/false,
-    "urlAnomaly": true/false,
-    "suspiciousForms": true/false
-  }
-}`;
-
-      const session = await this.aiManager.createSession({ temperature: 0.3 });
-      const response = await session.prompt(prompt);
-      
-      // Parse JSON from response
-      const jsonMatch = response.match(/\{[\s\S]*\}/);
-      let analysis = null;
-      
-      if (jsonMatch) {
-        analysis = JSON.parse(jsonMatch[0]);
-      } else {
-        // Fallback parsing
-        analysis = this.parseTextResponse(response);
-      }
-
-      await this.aiManager.destroySession();
-
-      // Enhance analysis with image results
-      if (imageAnalysis) {
-        analysis.imageAnalysis = imageAnalysis;
-        analysis.hasImageThreats = imageAnalysis.maliciousCount > 0;
-        analysis.maxImageRisk = imageAnalysis.maxRiskLevel;
-        
-        // Increase risk score if images are suspicious
-        if (imageAnalysis.maxRiskLevel === 'HIGH' || imageAnalysis.maxRiskLevel === 'CRITICAL') {
-          analysis.riskScore = Math.min(100, analysis.riskScore + 20);
-          analysis.redFlags.push(`Malicious images detected (${imageAnalysis.maliciousCount} images)`);
-        }
-      }
-
-      // Track threats
-      if (analysis.isPhishing || analysis.riskScore > 70) {
-        this.threatsToday++;
-        this.trackThreat(url, analysis);
-      }
-
-      return analysis;
-
-    } catch (error) {
-      console.error('Error detecting phishing:', error);
-      return {
-        riskScore: 0,
-        riskLevel: 'UNKNOWN',
-        isPhishing: false,
-        error: error.message
-      };
-    }
+    return await this._detectPhishingSimple(url, content, title, images);
   }
 
   /**
@@ -318,7 +225,8 @@ Provide JSON response:
   "tactics": ["tactic1", "tactic2"],
   "emotionalTriggers": ["trigger1", "trigger2"],
   "recommendation": "SAFE|CAUTION|WARNING|DANGEROUS",
-  "riskLevel": "LOW|MEDIUM|HIGH|CRITICAL"
+  "riskLevel": "LOW|MEDIUM|HIGH|CRITICAL",
+  "suspiciousPhrases": ["exact phrases that are suspicious or manipulative"]
 }`;
 
       const session = await this.aiManager.createSession({ temperature: 0.3 });
@@ -328,7 +236,15 @@ Provide JSON response:
       let analysis = null;
       
       if (jsonMatch) {
-        analysis = JSON.parse(jsonMatch[0]);
+        try {
+          const jsonStr = jsonMatch[0];
+          // Fix common JSON issues (trailing commas)
+          const fixedJson = jsonStr.replace(/,(\s*[}\]])/g, '$1');
+          analysis = JSON.parse(fixedJson);
+        } catch (jsonError) {
+          console.warn('Failed to parse JSON in social engineering detector:', jsonError.message);
+          analysis = this.parseTextResponse(response);
+        }
       } else {
         analysis = this.parseTextResponse(response);
       }
@@ -343,7 +259,7 @@ Provide JSON response:
       return analysis;
 
     } catch (error) {
-      console.error('Error detecting social engineering:', error);
+      console.error('Error detecting social engineering:', error.message);
       return {
         manipulationScore: 0,
         isSocialEngineering: false,
@@ -387,7 +303,15 @@ Provide JSON:
       let analysis = null;
       
       if (jsonMatch) {
-        analysis = JSON.parse(jsonMatch[0]);
+        try {
+          const jsonStr = jsonMatch[0];
+          // Fix common JSON issues (trailing commas)
+          const fixedJson = jsonStr.replace(/,(\s*[}\]])/g, '$1');
+          analysis = JSON.parse(fixedJson);
+        } catch (jsonError) {
+          console.warn('Failed to parse JSON in email analyzer:', jsonError.message);
+          analysis = this.parseTextResponse(response);
+        }
       } else {
         analysis = this.parseTextResponse(response);
       }
@@ -396,7 +320,7 @@ Provide JSON:
       return analysis;
 
     } catch (error) {
-      console.error('Error analyzing email:', error);
+      console.error('Error analyzing email:', error.message);
       return { isPhishing: false, riskScore: 0 };
     }
   }
@@ -411,7 +335,8 @@ Provide JSON:
       isPhishing: false,
       redFlags: [],
       confidence: 0,
-      recommendation: 'SAFE'
+      recommendation: 'SAFE',
+      suspiciousPhrases: []
     };
 
     // Buscar padrões no texto

@@ -39,7 +39,6 @@ const elements = {
   loadingOverlay: document.getElementById('loadingOverlay'),
 
   // Footer links
-  settingsLink: document.getElementById('settingsLink'),
   helpLink: document.getElementById('helpLink'),
   aboutLink: document.getElementById('aboutLink'),
 
@@ -85,6 +84,33 @@ async function init() {
 
   // Setup event listeners
   setupEventListeners();
+  
+  // Auto-extract content when popup opens
+  await autoExtractContent();
+}
+
+/**
+ * Auto-extract content when popup opens
+ */
+async function autoExtractContent() {
+  if (!currentTab) return;
+  
+  console.log('Auto-extracting content for:', currentTab.url);
+  
+  try {
+    const response = await sendMessage({
+      type: 'GET_TAB_CONTENT',
+      tabId: currentTab.id
+    });
+
+    if (response.success) {
+      extractedContent = response.content;
+      console.log('✅ Content auto-extracted');
+      // Don't show results automatically, just enable buttons
+    }
+  } catch (error) {
+    console.error('Auto-extract failed:', error);
+  }
 }
 
 /**
@@ -96,12 +122,12 @@ async function loadCurrentTab() {
     currentTab = tab;
 
     if (tab) {
-      elements.tabTitle.textContent = tab.title || 'Untitled';
-      elements.tabUrl.textContent = tab.url || '-';
+      safeSetText(elements.tabTitle, tab.title || 'Untitled');
+      safeSetText(elements.tabUrl, tab.url || '-');
     }
   } catch (error) {
     console.error('Error loading current tab:', error);
-    elements.tabTitle.textContent = 'Error loading tab';
+    safeSetText(elements.tabTitle, 'Error loading tab');
   }
 }
 
@@ -143,9 +169,30 @@ async function checkAIAvailability() {
 }
 
 /**
+ * Escape HTML to prevent XSS
+ */
+function escapeHTML(str) {
+  if (typeof str !== 'string') return '';
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+/**
+ * Safely set text content
+ */
+function safeSetText(element, text) {
+  if (element) {
+    element.textContent = text || '';
+  }
+}
+
+/**
  * Update AI status display
  */
 function updateAIStatus(status) {
+  if (!elements.aiStatus || !elements.statusIcon) return;
+
   elements.aiStatus.textContent = status;
   elements.aiStatus.className = `status-value ${status}`;
 
@@ -193,12 +240,6 @@ function setupEventListeners() {
   elements.clearResultsBtn.addEventListener('click', clearResults);
 
   // Footer links
-  elements.settingsLink.addEventListener('click', (e) => {
-    e.preventDefault();
-    // TODO: Open settings page
-    alert('Settings coming soon!');
-  });
-
   elements.helpLink.addEventListener('click', (e) => {
     e.preventDefault();
     showHelp();
@@ -256,7 +297,7 @@ async function handleSummarizeContent() {
     const response = await sendMessage({
       type: 'SUMMARIZE_CONTENT',
       data: {
-        content: extractedContent.text,
+        content: extractedContent.bodyText, // Use bodyText for better summaries
         maxLength: 150
       }
     });
@@ -293,12 +334,12 @@ async function handleAnalyzeContent() {
 4. Content quality assessment
 
 Page Title: ${extractedContent.title}
-Content: ${extractedContent.text.substring(0, 2000)}...`;
+Content: ${extractedContent.bodyText.substring(0, 3000)}...`;
 
     const response = await sendMessage({
       type: 'ANALYZE_TAB_CONTENT',
       data: {
-        content: extractedContent.text,
+        content: extractedContent.bodyText,
         prompt: analysisPrompt
       }
     });
@@ -357,12 +398,12 @@ async function handleCustomPrompt() {
   showLoading();
 
   try {
-    const fullPrompt = `${customPrompt}\n\nContext from current page:\nTitle: ${extractedContent.title}\nContent: ${extractedContent.text.substring(0, 2000)}...`;
+    const fullPrompt = `${customPrompt}\n\nContext from current page:\nTitle: ${extractedContent.title}\nContent: ${extractedContent.bodyText.substring(0, 3000)}...`;
 
     const response = await sendMessage({
       type: 'ANALYZE_TAB_CONTENT',
       data: {
-        content: extractedContent.text,
+        content: extractedContent.bodyText,
         prompt: fullPrompt
       }
     });
@@ -409,10 +450,17 @@ Content extracted successfully! You can now use the Summarize or Analyze buttons
 }
 
 /**
- * Show results section
+ * Show results section with safe HTML
  */
 function showResults(title, content) {
-  elements.resultsContent.innerHTML = `<h3>${title}</h3><div>${content}</div>`;
+  if (!elements.resultsContent || !elements.resultsSection) return;
+
+  // Sanitize title but allow safe content formatting (for now, content is already formatted)
+  const safeTitle = escapeHTML(title);
+
+  // Note: content may contain safe HTML like <strong>, <span> which we want to preserve
+  // Only escape if it's user-generated content
+  elements.resultsContent.innerHTML = `<h3>${safeTitle}</h3><div>${content}</div>`;
   elements.resultsSection.style.display = 'block';
 }
 
@@ -519,33 +567,32 @@ function displayAdvancedMetrics(analysis) {
   elements.advancedMetrics.style.display = 'block';
 
   // Update VAD Profile
-  if (analysis.details?.sentiment) {
-    const sentiment = analysis.details.sentiment;
-    
+  const sentimentDetails = analysis.details?.sentiment;
+  if (sentimentDetails) {
     // Valence (range: -1 to +1, display 0-100%)
-    const valencePercent = ((sentiment.valence + 1) / 2) * 100;
-    elements.valenceFill.style.width = `${valencePercent}%`;
-    elements.valenceValue.textContent = sentiment.valence.toFixed(2);
+    const valence = sentimentDetails.valence ?? 0;
+    const valencePercent = ((valence + 1) / 2) * 100;
+    elements.valenceFill.style.width = `${Math.max(0, Math.min(100, valencePercent))}%`;
+    elements.valenceValue.textContent = valence.toFixed(2);
 
     // Arousal (0 to 1, display as percentage)
-    const arousalPercent = sentiment.arousal * 100;
-    elements.arousalFill.style.width = `${arousalPercent}%`;
-    elements.arousalValue.textContent = sentiment.arousal.toFixed(2);
+    const arousal = sentimentDetails.arousal ?? 0;
+    elements.arousalFill.style.width = `${Math.max(0, Math.min(100, arousal * 100))}%`;
+    elements.arousalValue.textContent = arousal.toFixed(2);
 
     // Dominance (0 to 1, display as percentage)
-    const dominancePercent = sentiment.dominance * 100;
-    elements.dominanceFill.style.width = `${dominancePercent}%`;
-    elements.dominanceValue.textContent = sentiment.dominance.toFixed(2);
+    const dominance = sentimentDetails.dominance ?? 0;
+    elements.dominanceFill.style.width = `${Math.max(0, Math.min(100, dominance * 100))}%`;
+    elements.dominanceValue.textContent = dominance.toFixed(2);
 
     // Emotional state
-    if (sentiment.emotionalState) {
-      elements.emotionalState.textContent = `Emotional State: ${sentiment.emotionalState}`;
-    }
+    elements.emotionalState.textContent = `Emotional State: ${sentimentDetails.emotionalState || 'N/A'}`;
   }
 
   // Update lexicon scores
-  if (analysis.originalAnalysis?.sentiment?.dominantLexicons) {
-    const lexicons = analysis.originalAnalysis.sentiment.dominantLexicons;
+  const dominantLexicons = analysis.originalAnalysis?.sentiment?.dominantLexicons;
+  if (dominantLexicons && dominantLexicons.length > 0) {
+    const lexicons = dominantLexicons;
     const explanations = {
       urgency: 'Uses time pressure',
       authority: 'Claims authority',
@@ -559,14 +606,19 @@ function displayAdvancedMetrics(analysis) {
     elements.lexiconScores.innerHTML = lexicons.map(lex => 
       `<span class="lexicon-tag">${explanations[lex] || lex}</span>`
     ).join('');
+  } else {
+    elements.lexiconScores.innerHTML = '<span class="lexicon-tag">None detected</span>';
   }
 
   // Update linguistic anomalies
-  if (analysis.originalAnalysis?.sentiment?.linguisticFeatures?.anomalies) {
-    const anomalies = analysis.originalAnalysis.sentiment.linguisticFeatures.anomalies;
+  const linguisticAnomalies = analysis.originalAnalysis?.sentiment?.linguisticFeatures?.anomalies;
+  if (linguisticAnomalies && linguisticAnomalies.length > 0) {
+    const anomalies = linguisticAnomalies;
     elements.anomaliesList.innerHTML = anomalies.map(anomaly => 
       `<div class="anomaly-item">${anomaly}</div>`
     ).join('');
+  } else {
+    elements.anomaliesList.innerHTML = '<div class="anomaly-item">No anomalies found</div>';
   }
 
   // Update confidence breakdown
@@ -616,14 +668,19 @@ async function loadThreatStats() {
  * Update dashboard with current stats
  */
 function updateDashboard() {
-  elements.threatsCount.textContent = threatStats.today || 0;
-  elements.pagesCount.textContent = threatStats.total || 0;
-  
+  if (!elements.threatsCount || !elements.pagesCount || !elements.riskScore || !elements.riskFill) {
+    console.warn('Dashboard elements not found');
+    return;
+  }
+
+  safeSetText(elements.threatsCount, threatStats.today || 0);
+  safeSetText(elements.pagesCount, threatStats.total || 0);
+
   // Update risk level based on recent threats
-  const recentHighRisk = threatStats.recent.filter(t => 
+  const recentHighRisk = (threatStats.recent || []).filter(t =>
     ['HIGH', 'CRITICAL'].includes(t.riskLevel)
   ).length;
-  
+
   if (recentHighRisk > 0) {
     elements.riskScore.textContent = 'HIGH';
     elements.riskFill.className = 'risk-fill high';
@@ -676,7 +733,7 @@ async function handlePhishingScan() {
       type: 'DETECT_PHISHING',
       data: {
         url: extractedContent.url,
-        content: extractedContent.text,
+        content: extractedContent.bodyText,
         title: extractedContent.title,
         images: images
       }
@@ -684,10 +741,10 @@ async function handlePhishingScan() {
 
     if (response.success) {
       const analysis = response.analysis;
-      
+
       // Update dashboard
       const finalScore = analysis.finalRiskScore || analysis.riskScore || 0;
-      const riskLevel = analysis.riskLevel || analysis.riskLevel;
+      const riskLevel = analysis.riskLevel || 'UNKNOWN';
       elements.riskScore.textContent = riskLevel;
       elements.pagesCount.textContent = (threatStats.total || 0) + 1;
       
@@ -757,7 +814,7 @@ async function handleSentimentAnalysis() {
     const response = await sendMessage({
       type: 'ANALYZE_SENTIMENT',
       data: {
-        content: extractedContent.text,
+        content: extractedContent.bodyText,
         url: extractedContent.url
       }
     });
