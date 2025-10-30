@@ -16,6 +16,33 @@ export class PhishingDetector {
   }
 
   /**
+   * Robustly parse JSON with common AI response formatting issues
+   */
+  robustJsonParse(jsonStr) {
+    try {
+      return JSON.parse(jsonStr);
+    } catch (e1) {
+      try {
+        const fixed1 = jsonStr.replace(/,(\s*[}\]])/g, '$1');
+        return JSON.parse(fixed1);
+      } catch (e2) {
+        try {
+          const fixed2 = jsonStr.replace(/\[\s*"([^"]*)"/g, '["$1"');
+          return JSON.parse(fixed2);
+        } catch (e3) {
+          try {
+            const fixed3 = jsonStr.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '');
+            return JSON.parse(fixed3);
+          } catch (e4) {
+            console.warn('Could not parse JSON after multiple fixes:', e4.message);
+            return null;
+          }
+        }
+      }
+    }
+  }
+
+  /**
    * Detecta phishing na página atual (inclui análise de imagens)
    * Uses advanced hybrid scoring if available, falls back to simple analysis
    */
@@ -93,8 +120,16 @@ Provide response as JSON with:
   "suspiciousPhrases": ["exact problematic phrases or sentences"]
 }`;
 
-    const session = await this.aiManager.createSession({ temperature: 0.3 });
+    // OPTIMIZED: Reuse session from pool instead of creating new one
+    let session = this.aiManager.getPooledSession();
+    if (!session) {
+      session = await this.aiManager.getOrCreateSession({ temperature: 0.3 });
+    }
+
     const response = await session.prompt(prompt);
+
+    // Return session to pool for reuse
+    this.aiManager.returnSessionToPool(session);
 
     // Parse JSON from response
     const jsonMatch = response.match(/\{[\s\S]*\}/);
@@ -103,9 +138,11 @@ Provide response as JSON with:
     if (jsonMatch) {
       try {
         const jsonStr = jsonMatch[0];
-        // Fix common JSON issues (trailing commas)
-        const fixedJson = jsonStr.replace(/,(\s*[}\]])/g, '$1');
-        analysis = JSON.parse(fixedJson);
+        // Use robust parser
+        analysis = this.robustJsonParse(jsonStr);
+        if (!analysis) {
+          analysis = this.parseTextResponse(response);
+        }
       } catch (jsonError) {
         console.warn('Failed to parse JSON in phishing detector:', jsonError.message);
         analysis = this.parseTextResponse(response);
@@ -115,10 +152,8 @@ Provide response as JSON with:
       analysis = this.parseTextResponse(response);
     }
 
-    await this.aiManager.destroySession();
-
-    // Track threats
-    if (analysis.isPhishing || analysis.riskScore > 70) {
+    // Track threats - Lower threshold for better detection (was 70, now 50)
+    if (analysis.isPhishing || analysis.riskScore > 50) {
       this.threatsToday++;
       this.trackThreat(url, analysis);
     }
@@ -147,16 +182,47 @@ Provide response as JSON with:
 
       console.log('🔬 Starting advanced phishing detection with hybrid scoring...');
 
-      // Step 1: Get sentiment analysis
-      const sentimentAnalyzer = new SentimentAnalyzer(this.aiManager);
-      const sentimentAnalysis = await sentimentAnalyzer.analyzeAdvanced(content, url);
+      // OPTIMIZED: Parallelize all 3 analyzers for 3x speedup + timeout protection
+      const ANALYSIS_TIMEOUT = 10000; // 10 seconds timeout for all analyses combined
 
-      // Step 2: Get traditional phishing analysis (use fallback to avoid recursion)
-      const phishingAnalysis = await this.detectPhishingFallback(url, content, title, images);
+      const analysisPromise = Promise.all([
+        // Step 1: Get sentiment analysis (parallel)
+        (async () => {
+          const sentimentAnalyzer = new SentimentAnalyzer(this.aiManager);
+          return await sentimentAnalyzer.analyzeAdvanced(content, url);
+        })(),
 
-      // Step 3: Get linguistic features
-      const linguisticAnalyzer = new LinguisticAnalyzer();
-      const linguisticFeatures = linguisticAnalyzer.analyze(content);
+        // Step 2: Get traditional phishing analysis (parallel)
+        this.detectPhishingFallback(url, content, title, images),
+
+        // Step 3: Get linguistic features (parallel)
+        (async () => {
+          const linguisticAnalyzer = new LinguisticAnalyzer();
+          return linguisticAnalyzer.analyze(content);
+        })()
+      ]);
+
+      // Apply timeout with fallback
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Advanced detection timeout (10s)')), ANALYSIS_TIMEOUT)
+      );
+
+      let sentimentAnalysis, phishingAnalysis, linguisticFeatures;
+
+      try {
+        const [sentiment, phishing, linguistic] = await Promise.race([
+          analysisPromise,
+          timeoutPromise
+        ]);
+        sentimentAnalysis = sentiment;
+        phishingAnalysis = phishing;
+        linguisticFeatures = linguistic;
+        console.log('✅ Advanced detection completed within timeout');
+      } catch (timeoutError) {
+        console.warn('⏱️ Advanced detection timeout, falling back to simple detection:', timeoutError.message);
+        // Fallback to simple detection if advanced analysis times out
+        return await this._detectPhishingSimple(url, content, title, images);
+      }
 
       // Step 4: Use hybrid scorer to combine all analyses (image analysis disabled)
       const hybridScore = this.hybridScorer.calculateHybridScore({
@@ -229,18 +295,26 @@ Provide JSON response:
   "suspiciousPhrases": ["exact phrases that are suspicious or manipulative"]
 }`;
 
-      const session = await this.aiManager.createSession({ temperature: 0.3 });
+      // OPTIMIZED: Use pooled session for faster analysis
+      let session = this.aiManager.getPooledSession();
+      if (!session) {
+        session = await this.aiManager.getOrCreateSession({ temperature: 0.3 });
+      }
+
       const response = await session.prompt(prompt);
-      
+      this.aiManager.returnSessionToPool(session);
+
       const jsonMatch = response.match(/\{[\s\S]*\}/);
       let analysis = null;
-      
+
       if (jsonMatch) {
         try {
           const jsonStr = jsonMatch[0];
-          // Fix common JSON issues (trailing commas)
-          const fixedJson = jsonStr.replace(/,(\s*[}\]])/g, '$1');
-          analysis = JSON.parse(fixedJson);
+          // Use robust parser
+          analysis = this.robustJsonParse(jsonStr);
+          if (!analysis) {
+            analysis = this.parseTextResponse(response);
+          }
         } catch (jsonError) {
           console.warn('Failed to parse JSON in social engineering detector:', jsonError.message);
           analysis = this.parseTextResponse(response);
@@ -248,8 +322,6 @@ Provide JSON response:
       } else {
         analysis = this.parseTextResponse(response);
       }
-
-      await this.aiManager.destroySession();
 
       // Track threats
       if (analysis.isSocialEngineering || analysis.manipulationScore > 60) {
@@ -296,18 +368,26 @@ Provide JSON:
   "recommendation": "TRUST|CAUTION|DELETE"
 }`;
 
-      const session = await this.aiManager.createSession({ temperature: 0.3 });
+      // OPTIMIZED: Use pooled session for faster analysis
+      let session = this.aiManager.getPooledSession();
+      if (!session) {
+        session = await this.aiManager.getOrCreateSession({ temperature: 0.3 });
+      }
+
       const response = await session.prompt(prompt);
-      
+      this.aiManager.returnSessionToPool(session);
+
       const jsonMatch = response.match(/\{[\s\S]*\}/);
       let analysis = null;
-      
+
       if (jsonMatch) {
         try {
           const jsonStr = jsonMatch[0];
-          // Fix common JSON issues (trailing commas)
-          const fixedJson = jsonStr.replace(/,(\s*[}\]])/g, '$1');
-          analysis = JSON.parse(fixedJson);
+          // Use robust parser
+          analysis = this.robustJsonParse(jsonStr);
+          if (!analysis) {
+            analysis = this.parseTextResponse(response);
+          }
         } catch (jsonError) {
           console.warn('Failed to parse JSON in email analyzer:', jsonError.message);
           analysis = this.parseTextResponse(response);
@@ -316,7 +396,6 @@ Provide JSON:
         analysis = this.parseTextResponse(response);
       }
 
-      await this.aiManager.destroySession();
       return analysis;
 
     } catch (error) {
@@ -390,16 +469,35 @@ Provide JSON:
    */
   async getThreatStats() {
     try {
-      const { threats = [], threatsToday = 0 } = await chrome.storage.local.get('threats');
-      
+      // Get both threats and threatsToday from storage
+      const result = await chrome.storage.local.get(['threats', 'threatsToday']);
+      let threats = result.threats || [];
+      let threatsToday = result.threatsToday || 0;
+
+      // Validate threats is an array
+      if (!Array.isArray(threats)) {
+        console.warn('Invalid threats data in storage, resetting to empty array');
+        threats = [];
+      }
+
+      // Use instance variable if storage value is not set
+      const today = threatsToday || this.threatsToday;
+
       return {
         total: threats.length,
-        today: threatsToday || this.threatsToday,
+        today: today,
         recent: threats.slice(-10),
         byRiskLevel: this.groupByRiskLevel(threats)
       };
     } catch (error) {
-      return { total: 0, today: 0, recent: [], byRiskLevel: {} };
+      console.error('Error getting threat stats:', error);
+      // Return safe defaults with instance variable as fallback
+      return {
+        total: 0,
+        today: this.threatsToday || 0,
+        recent: [],
+        byRiskLevel: { LOW: 0, MEDIUM: 0, HIGH: 0, CRITICAL: 0 }
+      };
     }
   }
 

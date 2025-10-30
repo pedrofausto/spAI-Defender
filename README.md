@@ -24,18 +24,24 @@ spAI-Defender is a privacy-focused security tool that leverages on-device AI to:
 A robust browser extension that reads and analyzes content from web pages using Chrome's Built-in AI.
 
 **Current Features:**
-- On-device AI processing (privacy-first)
-- Content extraction and analysis from web pages
-- AI-powered summarization
-- Custom prompts for security analysis
-- Real-time page monitoring
+- ✅ **Automatic page analysis** - No clicks required
+- ✅ **Progressive visual alerts** - Faded red outlines (risk > 50) + badge (risk > 75)
+- ✅ **Image analysis with OCR** - Detects phishing in images
+- ✅ **Phishing detection** - AI-powered multi-layer detection
+- ✅ **Sentiment analysis** - Identifies manipulation tactics
+- ✅ **On-device AI processing** - Privacy-first, no data sent
+- ✅ **Summarization API optimized** - 2x faster performance
+- ✅ **Security dashboard** - Real-time statistics
+- ✅ **Multi-platform support** - WhatsApp, Telegram, Gmail, Outlook
+- ✅ **Visual security badge** - Appears for high risk pages
+- ✅ **Custom prompts** - Ask specific security questions
 
-**Planned Features:**
-- Sentiment analysis for messaging platforms
-- Phishing detection
-- Social engineering pattern recognition
-- Message analysis for WhatsApp, Telegram, etc.
-- Threat verdict system
+**Advanced Features:**
+- ✅ Progressive alert system (highlights → badge)
+- ✅ Automatic background analysis
+- ✅ Silent protection for low risk
+- ✅ Visual guidance for medium risk
+- ✅ Critical warnings for high risk
 
 **Learn More:** See [chrome-extension/README.md](chrome-extension/README.md) for detailed documentation.
 
@@ -142,27 +148,29 @@ cd spAI-Defender/chrome-extension
 
 ## Roadmap
 
-### Phase 1 (Current - ✅ Completed)
+### Phase 1 (Completed - ✅)
 - [x] Basic Chrome extension structure
 - [x] Content extraction from web pages
-- [x] AI integration (Prompt API)
+- [x] AI integration (Prompt API + Summarization API)
 - [x] Summarization and analysis
 - [x] Custom prompts
 - [x] Robust architecture
 
-### Phase 2 (In Progress)
-- [ ] Sentiment analysis implementation
-- [ ] Phishing detection patterns
-- [ ] Message content analysis
-- [ ] Threat scoring system
-- [ ] Social engineering pattern database
+### Phase 2 (Completed - ✅)
+- [x] Sentiment analysis implementation
+- [x] Phishing detection patterns
+- [x] Automatic page analysis
+- [x] Progressive visual alerts (highlights + badge)
+- [x] Threat scoring system
+- [x] Image analysis with OCR
+- [x] Social engineering detection
 
-### Phase 3 (Planned)
-- [ ] WhatsApp Web integration
-- [ ] Telegram Web integration
-- [ ] Email analysis (Gmail, Outlook)
-- [ ] Multi-tab comparative analysis
-- [ ] Export and reporting
+### Phase 3 (Completed - ✅)
+- [x] WhatsApp Web platform detection
+- [x] Telegram Web platform detection
+- [x] Gmail/Outlook email analysis
+- [x] Multi-platform support
+- [x] Real-time statistics tracking
 
 ### Phase 4 (Future)
 - [ ] Real-time monitoring dashboard

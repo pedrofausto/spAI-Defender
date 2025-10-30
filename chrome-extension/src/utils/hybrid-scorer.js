@@ -7,9 +7,9 @@ export class HybridScorer {
   constructor(config = {}) {
     this.weights = {
       sentiment: config.sentimentWeight || 0.30,    // 30%
-      phishing: config.phishingWeight || 0.40,      // 40%
-      image: config.imageWeight || 0.20,            // 20%
-      linguistic: config.linguisticWeight || 0.10    // 10%
+      phishing: config.phishingWeight || 0.50,      // 50% (increased from 40%, removed image weight)
+      image: config.imageWeight || 0.0,             // 0% (disabled - as requested)
+      linguistic: config.linguisticWeight || 0.20   // 20% (increased from 10% to compensate)
     };
 
     this.thresholds = {
@@ -40,12 +40,31 @@ export class HybridScorer {
     const linguisticScore = this.normalizeScore(linguisticFeatures.overall?.score, linguisticFeatures.overall?.anomalyScore);
 
     // Calculate weighted final score
-    const finalRiskScore = (
+    let finalRiskScore = (
       sentimentScore * this.weights.sentiment +
       phishingScore * this.weights.phishing +
       imageScore * this.weights.image +
       linguisticScore * this.weights.linguistic
     ) * 100;
+
+    // OPTIMIZED: Auto-detect clear phishing cases and elevate score
+    // If phishing score is high, override low hybrid scores
+    if (phishingScore > 0.5 && finalRiskScore < 65) {
+      console.warn('⚠️ OVERRIDE: Strong phishing signals detected (phishing score > 50%), elevating risk score');
+      finalRiskScore = Math.max(finalRiskScore, 65);
+    }
+    
+    // Boost score if multiple indicators present
+    const indicatorCount = [
+      sentimentScore > 0.3,
+      phishingScore > 0.5,
+      linguisticScore > 0.4
+    ].filter(Boolean).length;
+    
+    if (indicatorCount >= 2 && finalRiskScore < 60) {
+      console.log(`📊 Multiple indicators detected (${indicatorCount}), elevating score`);
+      finalRiskScore = Math.max(finalRiskScore, 60);
+    }
 
     // Determine risk level
     const riskLevel = this.determineRiskLevel(finalRiskScore);

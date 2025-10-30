@@ -1058,10 +1058,18 @@ async function analyzeImage(img, btn, tooltip) {
 //
 
 let whatsappAnalysisTimeout;
+let lastAnalysisTime = 0;
+let currentChatId = null;
+let chatCooldowns = new Map(); // Per-chat cooldown tracking
+const ANALYSIS_COOLDOWN = 2000; // Reduced to 2 seconds per chat for faster response
+const DEBOUNCE_DELAY = 500; // Reduced to 500ms for instant-feeling feedback
+const GLOBAL_COOLDOWN = 500; // Minimum gap between any analyses
+const ANALYSIS_LOCK_TIMEOUT = 30000; // Force-release lock after 30 seconds if hung
 
 /**
  * Initializes an observer to detect when the WhatsApp chat interface is loaded
  * and then starts monitoring the chat for new messages.
+ * OPTIMIZED: Includes active event listeners for instant message detection
  */
 function initializeWhatsAppObserver() {
   console.log('spAI-Defender: WhatsApp detected. Initializing automatic chat monitoring.');
@@ -1070,15 +1078,79 @@ function initializeWhatsAppObserver() {
   const chatPanelSelector = '#main';
   let chatPanel = document.querySelector(chatPanelSelector);
 
-  // This function will be called whenever the chat updates
+  // Throttled chat change handler
+  const handleChatChange = () => {
+    const activeChat = document.querySelector('#main header');
+    if (!activeChat) return;
+
+    // Get chat identifier
+    const chatTitle = activeChat.querySelector('span[dir="auto"]')?.textContent;
+    const newChatId = chatTitle || Math.random().toString();
+
+    // Only trigger if chat actually changed
+    if (newChatId === currentChatId) return;
+
+    console.log('🎯 Chat changed to:', chatTitle || 'Unknown');
+    currentChatId = newChatId;
+
+    // Check per-chat cooldown
+    const now = Date.now();
+    const lastChatAnalysis = chatCooldowns.get(newChatId) || 0;
+    if (now - lastChatAnalysis < GLOBAL_COOLDOWN) {
+      return;
+    }
+
+    // Schedule analysis with reduced delay
+    scheduleAnalysis();
+  };
+
+  // Debounced scheduler with per-chat cooldown
+  const scheduleAnalysis = () => {
+    clearTimeout(whatsappAnalysisTimeout);
+    whatsappAnalysisTimeout = setTimeout(() => {
+      const now = Date.now();
+      const lastChatAnalysis = chatCooldowns.get(currentChatId) || 0;
+
+      // Per-chat cooldown check
+      if (now - lastChatAnalysis < ANALYSIS_COOLDOWN) {
+        console.log('⏱️ Analysis on cooldown for this chat, skipping...');
+        return;
+      }
+
+      chatCooldowns.set(currentChatId, now);
+      analyzeAndHighlightMessages();
+    }, DEBOUNCE_DELAY);
+  };
+
+  // Listen for chat selection with throttling
+  let chatChangeTimeout;
+  const throttledChatObserver = new MutationObserver(() => {
+    clearTimeout(chatChangeTimeout);
+    chatChangeTimeout = setTimeout(handleChatChange, 100); // Faster throttle for responsiveness
+  });
+
+  // Observe the side panel for chat selection
+  const sidePanelSelector = '#pane-side';
+  const sidePanel = document.querySelector(sidePanelSelector);
+  if (sidePanel) {
+    throttledChatObserver.observe(sidePanel, {
+      childList: true,
+      subtree: false
+    });
+
+    // ADD CLICK LISTENERS to sidebar chat items (INSTANT TRIGGER)
+    setupChatSidebarClickListeners(sidePanelSelector, handleChatChange);
+  }
+
+  // Lightweight observer for new messages only
   const onChatUpdate = () => {
-      // Debounce analysis to avoid running on every small DOM change
-      clearTimeout(whatsappAnalysisTimeout);
-      whatsappAnalysisTimeout = setTimeout(analyzeAndHighlightMessages, 1500);
+    scheduleAnalysis();
   };
 
   if (chatPanel) {
     startWhatsAppChatObserver(chatPanel, onChatUpdate);
+    // Setup real-time message detection
+    setupRealtimeMessageDetection(chatPanel);
     return;
   }
 
@@ -1088,10 +1160,117 @@ function initializeWhatsAppObserver() {
     if (chatPanel) {
       obs.disconnect();
       startWhatsAppChatObserver(chatPanel, onChatUpdate);
+      // Setup real-time message detection
+      setupRealtimeMessageDetection(chatPanel);
     }
   });
 
   bodyObserver.observe(document.body, { childList: true, subtree: true });
+}
+
+/**
+ * Setup click listeners on chat sidebar items for instant message analysis
+ * @param {string} sidePanelSelector - CSS selector for the sidebar
+ * @param {Function} callback - Function to call when chat is clicked
+ */
+function setupChatSidebarClickListeners(sidePanelSelector, callback) {
+  const sidePanel = document.querySelector(sidePanelSelector);
+  if (!sidePanel) return;
+
+  sidePanel.addEventListener('click', (event) => {
+    // Find the closest chat item
+    const chatItem = event.target.closest('[role="listitem"], [data-testid="chat-list-item"], div[role="button"]');
+    if (chatItem) {
+      console.log('👆 Chat item clicked - triggering immediate analysis');
+      // Small delay to allow WhatsApp to switch to the chat
+      setTimeout(callback, 100);
+    }
+  }, true); // Use capture phase for better event handling
+
+  console.log('✅ Chat sidebar click listeners installed');
+}
+
+/**
+ * Setup real-time detection of new messages as they arrive
+ * @param {HTMLElement} chatPanel - The main chat panel element
+ */
+function setupRealtimeMessageDetection(chatPanel) {
+  let lastDetectedMessageCount = 0;
+
+  // Observer specifically for detecting new message elements
+  const messageDetectionObserver = new MutationObserver((mutations) => {
+    // Check if new message elements were added
+    mutations.forEach(mutation => {
+      mutation.addedNodes.forEach(node => {
+        if (node.nodeType === 1) { // Element node
+          // Check if this is a message element
+          const messageElement = node.closest('div[data-id]') ||
+                                node.querySelector('div[data-id]');
+          if (messageElement) {
+            console.log('📨 New message detected - queuing analysis');
+            // Schedule quick analysis for just new messages
+            scheduleQuickMessageAnalysis(messageElement);
+          }
+        }
+      });
+    });
+  });
+
+  // Observer configuration: watch for new child elements in message container
+  const messageContainer = chatPanel.querySelector('[role="application"] [role="log"]') ||
+                          chatPanel.querySelector('[role="main"]');
+
+  if (messageContainer) {
+    messageDetectionObserver.observe(messageContainer, {
+      childList: true,  // Watch for new message elements
+      subtree: true,
+      characterData: false
+    });
+    console.log('✅ Real-time message detection enabled');
+  }
+}
+
+/**
+ * Schedule analysis of a specific new message with minimal delay
+ * @param {HTMLElement} messageElement - The message element to analyze
+ */
+function scheduleQuickMessageAnalysis() {
+  // Use requestAnimationFrame for faster response
+  requestAnimationFrame(() => {
+    setTimeout(() => {
+      analyzeAndHighlightMessages();
+    }, 200); // Very minimal delay
+  });
+}
+
+/**
+ * Add a threat indicator badge to a chat sidebar item
+ * @param {HTMLElement} chatItem - The chat list item element
+ * @param {string} riskLevel - Risk level (high/medium/low)
+ */
+function addChatThreatIndicator(chatItem, riskLevel) {
+  // Remove existing indicator
+  const existing = chatItem.querySelector('.spai-chat-threat-indicator');
+  if (existing) {
+    existing.remove();
+  }
+
+  // Don't add indicator for low risk
+  if (riskLevel === 'low' || riskLevel === 'LOW') {
+    return;
+  }
+
+  const indicator = document.createElement('div');
+  indicator.className = `spai-chat-threat-indicator spai-${riskLevel.toLowerCase()}`;
+  indicator.title = `spAI-Defender: ${riskLevel.toUpperCase()} RISK - Suspicious content detected`;
+
+  // Make position relative if needed
+  if (getComputedStyle(chatItem).position === 'static') {
+    chatItem.style.position = 'relative';
+  }
+
+  chatItem.appendChild(indicator);
+  console.log(`🚨 Threat indicator added to chat (${riskLevel})`);
 }
 
 /**
@@ -1116,15 +1295,26 @@ function startWhatsAppChatObserver(chatPanel, callback) {
 
 /**
  * NEW: Iterates through messages, analyzes them, and applies highlights.
+ * OPTIMIZED: Only analyzes new/unanalyzed messages, uses batching
  */
 async function analyzeAndHighlightMessages() {
     if (autoAnalysisInProgress) {
         console.log('⏭️ WhatsApp analysis already in progress, skipping.');
         return;
     }
-    
+
     try {
         autoAnalysisInProgress = true;
+
+        // SAFETY: Set a timeout to force-release the lock if analysis hangs
+        const lockTimeoutId = setTimeout(() => {
+            if (autoAnalysisInProgress) {
+                console.warn('⚠️ Analysis lock timeout (30s) - force releasing');
+                autoAnalysisInProgress = false;
+            }
+        }, ANALYSIS_LOCK_TIMEOUT);
+
+        const startTime = performance.now();
         console.log('🔄 Analyzing WhatsApp messages for highlighting...');
         
         const messages = extractFullWhatsAppConversation();
@@ -1133,38 +1323,109 @@ async function analyzeAndHighlightMessages() {
             return;
         }
         
-        console.log(`📊 Found ${messages.length} messages, analyzing each one...`);
+        // Filter only unanalyzed incoming messages (performance optimization)
+        const unanalyzedMessages = messages.filter(msg => 
+            msg.direction === 'in' && msg.element.dataset.spaiAnalyzed !== 'true'
+        );
+        
+        if (unanalyzedMessages.length === 0) {
+            console.log('✅ All messages already analyzed, skipping.');
+            return;
+        }
+        
+        console.log(`📊 Found ${unanalyzedMessages.length} new messages to analyze (of ${messages.length} total)`);
 
-        // Clear previous highlights to handle deleted messages or chat switches
-        document.querySelectorAll('.spai-suspicious-overlay').forEach(el => el.remove());
+        // Analyze messages in small batches to avoid blocking
+        const BATCH_SIZE = 3; // Analyze max 3 messages at a time
+        let analyzedCount = 0;
+        
+        for (let i = 0; i < unanalyzedMessages.length; i += BATCH_SIZE) {
+            const batch = unanalyzedMessages.slice(i, i + BATCH_SIZE);
+            
+            // Process batch
+            await Promise.all(batch.map(async (message) => {
+                try {
+                    message.element.dataset.spaiAnalyzed = 'true'; // Mark as checked immediately
+                    
+                    const response = await chrome.runtime.sendMessage({
+                        type: 'DETECT_PHISHING',
+                        data: { content: message.text }
+                    });
 
-        for (const message of messages) {
-            // Only analyze incoming messages that haven't been checked yet
-            if (message.direction === 'in' && !message.element.dataset.spaiAnalyzed) {
-                
-                message.element.dataset.spaiAnalyzed = 'true'; // Mark as checked
+                    if (response?.success && response.analysis) {
+                        const riskScore = response.analysis.finalRiskScore || response.analysis.riskScore || 0;
 
-                const response = await chrome.runtime.sendMessage({
-                    type: 'DETECT_PHISHING',
-                    data: { content: message.text }
-                });
+                        // OPTIMIZED: Lowered threshold from 50 to 30 for better visibility of suspicious content
+                        if (riskScore > 30) {
+                            console.log(`⚠️ Suspicious message detected (risk: ${riskScore})`);
+                            const suspiciousPhrases = response.analysis.suspiciousPhrases || [];
 
-                if (response?.success && response.analysis) {
-                    const riskScore = response.analysis.finalRiskScore || response.analysis.riskScore || 0;
-                    if (riskScore > 50) {
-                        // Extract suspicious phrases from analysis
-                        const suspiciousPhrases = response.analysis.suspiciousPhrases || [];
-                        highlightSuspiciousMessage(message.element, riskScore, suspiciousPhrases);
+                            // Apply highlight in requestAnimationFrame to avoid forced reflow
+                            requestAnimationFrame(() => {
+                                highlightSuspiciousMessage(message.element, riskScore, suspiciousPhrases);
+                            });
+                        }
+                        analyzedCount++;
                     }
+                } catch (err) {
+                    console.warn('Error analyzing individual message:', err.message);
                 }
+            }));
+            
+            // Yield to main thread between batches
+            if (i + BATCH_SIZE < unanalyzedMessages.length) {
+                await new Promise(resolve => setTimeout(resolve, 100));
             }
         }
-        console.log(`✅ WhatsApp individual message analysis complete for ${messages.length} messages.`);
+        
+        const duration = (performance.now() - startTime).toFixed(2);
+        console.log(`✅ Analysis complete: ${analyzedCount}/${unanalyzedMessages.length} messages analyzed in ${duration}ms`);
+
+        // Update sidebar threat indicator based on analysis results
+        if (unanalyzedMessages.some(msg => msg.element.dataset.spaiAnalyzed === 'true')) {
+          updateChatSidebarThreatIndicator();
+        }
     } catch (error) {
         console.error('Error during WhatsApp message highlighting:', error.message);
     } finally {
+        clearTimeout(lockTimeoutId); // Clear the safety timeout
         autoAnalysisInProgress = false;
     }
+}
+
+/**
+ * Update threat indicator on the sidebar for the currently active chat
+ */
+function updateChatSidebarThreatIndicator() {
+  // Find the current active chat in the sidebar
+  const activeChatItem = document.querySelector('#pane-side [role="listitem"][aria-selected="true"]') ||
+                        document.querySelector('#pane-side div[role="button"].active') ||
+                        document.querySelector('#pane-side [data-testid="chat-list-item-selected"]');
+
+  if (!activeChatItem) {
+    console.log('Could not find active chat item in sidebar');
+    return;
+  }
+
+  // Scan all messages in current chat for any with high risk
+  const messages = extractFullWhatsAppConversation();
+  let maxRiskLevel = 'low';
+
+  messages.forEach(msg => {
+    if (msg.element.dataset.spaiRiskLevel) {
+      const riskLevel = msg.element.dataset.spaiRiskLevel;
+      if (riskLevel === 'high' || riskLevel === 'HIGH') {
+        maxRiskLevel = 'high';
+      } else if ((riskLevel === 'medium' || riskLevel === 'MEDIUM') && maxRiskLevel !== 'high') {
+        maxRiskLevel = 'medium';
+      }
+    }
+  });
+
+  // Add threat indicator if needed
+  if (maxRiskLevel !== 'low') {
+    addChatThreatIndicator(activeChatItem, maxRiskLevel);
+  }
 }
 
 /**
@@ -1175,11 +1436,20 @@ async function analyzeCurrentWhatsAppChat() {
         console.log('⏭️ WhatsApp analysis already in progress, skipping.');
         return;
     }
-    
+
     try {
         autoAnalysisInProgress = true;
+
+        // SAFETY: Set a timeout to force-release the lock if analysis hangs
+        const lockTimeoutId = setTimeout(() => {
+            if (autoAnalysisInProgress) {
+                console.warn('⚠️ Analysis lock timeout (30s) - force releasing');
+                autoAnalysisInProgress = false;
+            }
+        }, ANALYSIS_LOCK_TIMEOUT);
+
         console.log('🔄 Analyzing WhatsApp chat content individually...');
-        
+
         const messages = extractFullWhatsAppConversation();
 
         if (messages.length === 0) {
@@ -1202,7 +1472,8 @@ async function analyzeCurrentWhatsAppChat() {
 
             if (response && response.success && response.analysis) {
                 const riskScore = response.analysis.finalRiskScore || response.analysis.riskScore || 0;
-                if (riskScore > 50) {
+                // OPTIMIZED: Lowered threshold from 50 to 30 for better visibility
+                if (riskScore > 30) {
                     // Extract suspicious phrases from analysis
                     const suspiciousPhrases = response.analysis.suspiciousPhrases || [];
                     highlightSuspiciousMessage(message.element, riskScore, suspiciousPhrases);
@@ -1210,10 +1481,11 @@ async function analyzeCurrentWhatsAppChat() {
             }
         }
         console.log(`✅ WhatsApp individual message analysis complete for ${messages.length} messages.`);
-        
+
     } catch (error) {
         console.error('Error during WhatsApp chat analysis:', error.message);
     } finally {
+        clearTimeout(lockTimeoutId); // Clear the safety timeout
         autoAnalysisInProgress = false;
     }
 }
@@ -1227,16 +1499,24 @@ async function analyzeCurrentWhatsAppChat() {
 function highlightSuspiciousMessage(element, riskScore, suspiciousPhrases = []) {
     if (!element) return;
 
+    console.log('🔴 highlightSuspiciousMessage called with:', { riskScore, phrasesCount: suspiciousPhrases?.length || 0 });
+
     let riskLevel = 'medium';
     if (riskScore > 75) {
         riskLevel = 'high';
     }
 
+    // Store risk level on the element for sidebar indicator to use
+    element.dataset.spaiRiskLevel = riskLevel;
+    element.dataset.spaiRiskScore = riskScore;
+
     // If we have specific suspicious phrases, highlight those specifically
     if (suspiciousPhrases && suspiciousPhrases.length > 0) {
+        console.log('💡 Using phrase-specific highlighting');
         highlightSpecificPhrases(element, suspiciousPhrases, riskLevel, riskScore);
     } else {
         // Fallback: highlight entire message
+        console.log('⚠️ No phrases provided, using full message overlay');
         const overlay = document.createElement('div');
         overlay.className = 'spai-suspicious-overlay';
         overlay.classList.add(`spai-risk-${riskLevel}`);
@@ -1255,7 +1535,8 @@ function highlightSuspiciousMessage(element, riskScore, suspiciousPhrases = []) 
 }
 
 /**
- * Highlights specific suspicious phrases within the message text.
+ * Highlights specific suspicious phrases within the message text - VISUALLY PROMINENT VERSION
+ * Directly modifies the WhatsApp message styling to make threats obvious
  * @param {HTMLElement} element The message element containing the text.
  * @param {Array<string>} phrases The suspicious phrases to highlight.
  * @param {string} riskLevel The risk level (medium/high).
@@ -1263,87 +1544,160 @@ function highlightSuspiciousMessage(element, riskScore, suspiciousPhrases = []) 
  */
 function highlightSpecificPhrases(element, phrases, riskLevel, riskScore) {
     try {
-        // Find the text content element
-        let textEl = element.querySelector('.selectable-text span');
-        if (!textEl) {
-            textEl = element.querySelector('span.selectable-text');
-        }
-        if (!textEl) {
-            textEl = element.querySelector('[data-lexical-text="true"]');
-        }
-        if (!textEl) {
-            // Try any span with meaningful text
-            const spans = element.querySelectorAll('span');
-            for (const span of spans) {
-                const text = span.textContent.trim();
-                if (text && text.length > 3) {
-                    textEl = span;
+        // Find container div that wraps the message (parent of span[dir="auto"])
+        let containerDiv = element;
+        
+        // Try to find container div by looking for span[dir="auto"] parent
+        const dirSpans = element.querySelectorAll('span[dir="auto"]');
+        if (dirSpans.length > 0) {
+            // Find common parent of all span[dir="auto"] elements
+            let parent = dirSpans[0].parentElement;
+            while (parent && parent !== element && parent !== document.body) {
+                // Check if this parent contains all the dir spans
+                const allContained = Array.from(dirSpans).every(span => parent.contains(span));
+                if (allContained) {
+                    containerDiv = parent;
                     break;
                 }
+                parent = parent.parentElement;
             }
         }
         
-        if (!textEl || !textEl.textContent) {
-            console.warn('Could not find text element for phrase highlighting');
-            return;
+        // Fallback: try to find message bubble
+        if (!containerDiv || containerDiv === element) {
+            containerDiv = element.querySelector('[data-pre-plain-text]')?.parentElement || element;
         }
 
-        let originalHTML = textEl.innerHTML;
-        let modifiedHTML = originalHTML;
-        let highlighted = false;
+        // Define colors for risk levels
+        const bgColor = riskLevel === 'high' ? 'rgba(234, 67, 53, 0.25)' : 'rgba(255, 235, 59, 0.25)';
+        const borderColor = riskLevel === 'high' ? '#ea4335' : '#fbbc04';
+        
+        // Style the container div
+        if (containerDiv && containerDiv !== document.body) {
+            containerDiv.style.setProperty('background', bgColor, 'important');
+            containerDiv.style.setProperty('border-left', `4px solid ${borderColor}`, 'important');
+            containerDiv.style.setProperty('border-radius', '7.5px', 'important');
+            containerDiv.classList.add('spai-highlighted-message');
+            containerDiv.classList.add(`spai-risk-${riskLevel}`);
+        }
 
-        // Wrap each suspicious phrase with a highlight span
-        for (const phrase of phrases) {
-            if (!phrase || phrase.trim().length < 3) continue;
-            
-            // Escape special regex characters
-            const escapedPhrase = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            
-            // Use a new regex for each phrase to avoid lastIndex issues
-            const testRegex = new RegExp(escapedPhrase, 'gi');
-            if (testRegex.test(originalHTML)) {
-                const replaceRegex = new RegExp(`(${escapedPhrase})`, 'gi');
-                modifiedHTML = modifiedHTML.replace(replaceRegex, (match) => {
-                    if (!match.includes('spai-suspicious-text')) {
-                        highlighted = true;
-                        return `<span class="spai-suspicious-text spai-risk-${riskLevel}" style="
-                            background: ${riskLevel === 'high' ? 'rgba(234, 67, 53, 0.25)' : 'rgba(255, 235, 59, 0.25)'};
-                            border-bottom: 2px solid ${riskLevel === 'high' ? '#ea4335' : '#fbbc04'};
-                            border-radius: 2px;
-                            padding: 0 2px;
-                            font-weight: 500;
-                            transition: all 0.2s ease;
-                        " title="⚠️ Suspicious content detected (risk: ${riskScore}/100)">${match}</span>`;
-                    }
-                    return match;
-                });
-                // Update originalHTML after each replacement to accumulate changes
-                originalHTML = modifiedHTML;
+        // Find and style all span[dir="auto"] elements within the message
+        const dirSpansList = element.querySelectorAll('span[dir="auto"]');
+        dirSpansList.forEach(span => {
+            span.style.setProperty('background-color', bgColor, 'important');
+            span.style.setProperty('color', riskLevel === 'high' ? '#8b0000' : '#856404', 'important');
+            span.classList.add(`spai-highlighted-text`);
+            span.classList.add(`spai-risk-${riskLevel}`);
+        });
+
+        // If no dir spans found, try to find any text-containing spans
+        if (dirSpansList.length === 0) {
+            const textSpans = element.querySelectorAll('span.selectable-text, .selectable-text span');
+            textSpans.forEach(span => {
+                if (span.textContent.trim().length > 3) {
+                    span.style.setProperty('background-color', bgColor, 'important');
+                    span.style.setProperty('color', riskLevel === 'high' ? '#8b0000' : '#856404', 'important');
+                    span.classList.add(`spai-highlighted-text`);
+                    span.classList.add(`spai-risk-${riskLevel}`);
+                }
+            });
+        }
+        
+        // Add badge overlay for visual indicator
+        if (!element.querySelector('.spai-risk-badge')) {
+            const badge = document.createElement('div');
+            badge.className = `spai-risk-badge spai-risk-${riskLevel}`;
+            badge.textContent = riskLevel === 'high' ? 'HIGH RISK' : 'SUSPICIOUS';
+            badge.style.cssText = `
+                position: absolute;
+                top: -10px;
+                right: 10px;
+                background: ${riskLevel === 'high' ? '#d32f2f' : '#f57c00'};
+                color: white;
+                padding: 2px 8px;
+                border-radius: 10px;
+                font-size: 10px;
+                font-weight: bold;
+                z-index: 100;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            `;
+            if (getComputedStyle(element).position === 'static') {
+                element.style.position = 'relative';
             }
+            element.appendChild(badge);
         }
-
-        // Only update HTML if we made changes
-        if (highlighted && modifiedHTML !== originalHTML) {
-            textEl.innerHTML = modifiedHTML;
-            console.log(`✅ Highlighted ${phrases.length} suspicious phrase(s) in message`);
-        }
+        
+        console.log(`✅ Styled container div and ${dirSpansList.length || 'text'} span(s) with ${riskLevel} risk highlighting`);
 
     } catch (error) {
-        console.error('Error highlighting specific phrases:', error);
+        console.error('Error highlighting message container and spans:', error);
         // Fallback to full message highlight
-        const overlay = document.createElement('div');
-        overlay.className = 'spai-suspicious-overlay';
-        overlay.classList.add(`spai-risk-${riskLevel}`);
-        overlay.title = `spAI-Defender Warning: Risk score ${riskScore}/100`;
+        applyFallbackHighlight(element, riskLevel, riskScore);
+    }
+}
+
+/**
+ * Fallback highlight for when phrase highlighting fails
+ */
+function applyFallbackHighlight(element, riskLevel, riskScore) {
+    try {
+        // Find container div
+        let containerDiv = element;
+        const dirSpans = element.querySelectorAll('span[dir="auto"]');
         
-        const messageContainer = element.querySelector('div[role="application"]');
-        if (messageContainer) {
-            messageContainer.style.position = 'relative';
-            messageContainer.appendChild(overlay);
-        } else {
-            element.style.position = 'relative';
-            element.appendChild(overlay);
+        if (dirSpans.length > 0) {
+            let parent = dirSpans[0].parentElement;
+            while (parent && parent !== element && parent !== document.body) {
+                const allContained = Array.from(dirSpans).every(span => parent.contains(span));
+                if (allContained) {
+                    containerDiv = parent;
+                    break;
+                }
+                parent = parent.parentElement;
+            }
         }
+        
+        // Fallback to message bubble
+        if (!containerDiv || containerDiv === element) {
+            containerDiv = element.querySelector('[data-pre-plain-text]')?.parentElement || element;
+        }
+        
+        const bgColor = riskLevel === 'high' ? 'rgba(234, 67, 53, 0.25)' : 'rgba(255, 235, 59, 0.25)';
+        const borderColor = riskLevel === 'high' ? '#ea4335' : '#fbbc04';
+        
+        // Style container div
+        if (containerDiv && containerDiv !== document.body) {
+            containerDiv.style.setProperty('background', bgColor, 'important');
+            containerDiv.style.setProperty('border-left', `5px solid ${borderColor}`, 'important');
+            containerDiv.style.setProperty('border-radius', '7.5px', 'important');
+            containerDiv.classList.add('spai-highlighted-message');
+            containerDiv.classList.add(`spai-risk-${riskLevel}`);
+        }
+        
+        // Style all span[dir="auto"] elements
+        dirSpans.forEach(span => {
+            span.style.setProperty('background-color', bgColor, 'important');
+            span.style.setProperty('color', riskLevel === 'high' ? '#8b0000' : '#856404', 'important');
+            span.classList.add(`spai-highlighted-text`);
+            span.classList.add(`spai-risk-${riskLevel}`);
+        });
+        
+        // If no dir spans, style any text spans
+        if (dirSpans.length === 0) {
+            const textSpans = element.querySelectorAll('span.selectable-text, .selectable-text span');
+            textSpans.forEach(span => {
+                if (span.textContent.trim().length > 3) {
+                    span.style.setProperty('background-color', bgColor, 'important');
+                    span.style.setProperty('color', riskLevel === 'high' ? '#8b0000' : '#856404', 'important');
+                    span.classList.add(`spai-highlighted-text`);
+                    span.classList.add(`spai-risk-${riskLevel}`);
+                }
+            });
+        }
+        
+        console.log(`✅ Fallback highlight applied to container and ${dirSpans.length || 'text'} span(s)`);
+    } catch (e) {
+        console.error('Fallback highlight failed:', e);
     }
 }
 
@@ -1354,21 +1708,67 @@ function highlightSpecificPhrases(element, phrases, riskLevel, riskScore) {
 function extractFullWhatsAppConversation() {
     console.log('🔍 Starting WhatsApp message extraction...');
     const messages = [];
-    
-    // Try multiple strategies to find messages
-    
-    // Strategy 1: div[role="row"] with selectable-text
-    let messageElements = document.querySelectorAll('div[role="row"]');
-    console.log(`Strategy 1: Found ${messageElements.length} role="row" elements`);
-    
-    if (messageElements.length === 0) {
-        // Strategy 2: Look for selectable-text directly
-        messageElements = document.querySelectorAll('[data-id]');
-        console.log(`Strategy 2: Found ${messageElements.length} data-id elements`);
+    const seenElements = new Set(); // Track already processed elements to avoid duplicates
+
+    // ENHANCED: Multiple strategies for different WhatsApp versions
+    const strategies = [
+        // Strategy 1: div[role="row"] - Latest WhatsApp Web
+        () => document.querySelectorAll('div[role="row"]'),
+
+        // Strategy 2: div with data-id and specific message structure
+        () => document.querySelectorAll('div[data-id][role="article"]'),
+
+        // Strategy 3: Message containers with message-in/message-out classes
+        () => document.querySelectorAll('div.message-in, div.message-out'),
+
+        // Strategy 4: Divs containing selectable-text spans
+        () => {
+            const results = [];
+            document.querySelectorAll('.selectable-text').forEach(textEl => {
+                let parent = textEl.parentElement;
+                while (parent && !parent.hasAttribute('data-id') && parent !== document.body) {
+                    parent = parent.parentElement;
+                }
+                if (parent && parent.hasAttribute('data-id') && !results.includes(parent)) {
+                    results.push(parent);
+                }
+            });
+            return results;
+        },
+
+        // Strategy 5: Main message container divs
+        () => document.querySelectorAll('div[role="main"] > div > div'),
+
+        // Strategy 6: Fallback - any div with data-id attribute in message area
+        () => {
+            const main = document.querySelector('div[role="main"]');
+            return main ? main.querySelectorAll('div[data-id]') : [];
+        }
+    ];
+
+    let messageElements = [];
+    for (let i = 0; i < strategies.length; i++) {
+        try {
+            const result = strategies[i]();
+            messageElements = result;
+            if (messageElements.length > 0) {
+                console.log(`✅ Strategy ${i + 1} found ${messageElements.length} messages`);
+                break;
+            } else {
+                console.log(`Strategy ${i + 1}: No messages found`);
+            }
+        } catch (e) {
+            console.warn(`Strategy ${i + 1} failed:`, e.message);
+        }
     }
 
+    // OPTIMIZED: Deduplication and text extraction
     messageElements.forEach((el, index) => {
         try {
+            // Skip if already processed
+            if (seenElements.has(el)) return;
+            seenElements.add(el);
+
             // Try to find text in multiple ways
             let textEl = el.querySelector('.selectable-text span');
             if (!textEl) {
@@ -1378,28 +1778,54 @@ function extractFullWhatsAppConversation() {
                 textEl = el.querySelector('[data-lexical-text="true"]');
             }
             if (!textEl) {
-                // Try any span with meaningful text
-                const spans = el.querySelectorAll('span');
-                for (const span of spans) {
+                // Try finding any span with meaningful text (avoid short UI text)
+                const spans = Array.from(el.querySelectorAll('span')).filter(span => {
                     const text = span.textContent.trim();
-                    if (text && text.length > 3 && text.length < 500) {
-                        textEl = span;
-                        break;
-                    }
+                    // Filter out timestamps, UI elements (usually <20 chars and very short)
+                    return text && text.length > 3 && text.length < 1000;
+                });
+                if (spans.length > 0) {
+                    // Prefer the longest text (usually the message content)
+                    textEl = spans.reduce((longest, current) =>
+                        current.textContent.length > longest.textContent.length ? current : longest
+                    );
                 }
             }
-            
-            if (!textEl) return;
+
+            if (!textEl) {
+                // Last resort: get all text content from element
+                const fullText = el.innerText?.trim();
+                if (!fullText || fullText.length < 3) return;
+
+                messages.push({
+                    element: el,
+                    text: fullText,
+                    sender: 'Unknown',
+                    timestamp: '',
+                    direction: 'unknown'
+                });
+                return;
+            }
 
             const text = textEl.textContent.trim();
-            if (!text) return;
+            if (!text || text.length < 1) return;
 
             // Determine direction - incoming or outgoing
             let direction = 'unknown';
-            if (el.classList.contains('message-in') || el.querySelector('.message-in')) {
+            const messageInEl = el.querySelector('.message-in') || el.classList.contains('message-in');
+            const messageOutEl = el.querySelector('.message-out') || el.classList.contains('message-out');
+
+            if (messageInEl) {
                 direction = 'in';
-            } else if (el.classList.contains('message-out') || el.querySelector('.message-out')) {
+            } else if (messageOutEl) {
                 direction = 'out';
+            } else {
+                // Try to infer from position/class patterns
+                const parent = el.parentElement;
+                if (parent && parent.className) {
+                    if (parent.className.includes('out')) direction = 'out';
+                    else if (parent.className.includes('in')) direction = 'in';
+                }
             }
 
             messages.push({
@@ -1410,11 +1836,17 @@ function extractFullWhatsAppConversation() {
                 direction
             });
         } catch (e) {
-            console.warn(`Could not parse message element ${index}:`, e);
+            console.warn(`Could not parse message element ${index}:`, e.message);
         }
     });
 
-    console.log(`✅ Extracted ${messages.length} messages from WhatsApp`);
+    console.log(`✅ Extracted ${messages.length} messages from WhatsApp (${seenElements.size} elements scanned)`);
+    if (messages.length === 0) {
+        console.warn('⚠️ No messages found - WhatsApp DOM may have changed. Debug info:');
+        console.warn('- Body element exists:', !!document.body);
+        console.warn('- Main container:', document.querySelector('div[role="main"]') ? 'Found' : 'Not found');
+        console.warn('- Selectable text elements:', document.querySelectorAll('.selectable-text').length);
+    }
     return messages;
 }
 
@@ -1440,23 +1872,24 @@ function injectWhatsAppHighlightStyles() {
     const style = document.createElement('style');
     style.id = styleId;
     style.textContent = `
+        /* ===== Message Overlay Styles ===== */
         .spai-suspicious-overlay {
             position: absolute;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            border-radius: 7.5px; /* Match WhatsApp's message bubble radius */
-            pointer-events: none; /* Allows clicking through the overlay */
+            border-radius: 7.5px;
+            pointer-events: none;
             transition: background-color 0.3s ease, box-shadow 0.3s ease;
             z-index: 10;
         }
         .spai-suspicious-overlay.spai-risk-medium {
-            background-color: rgba(255, 235, 59, 0.15); /* Yellow with low opacity */
+            background-color: rgba(255, 235, 59, 0.15);
             box-shadow: inset 0 0 0 1px rgba(251, 188, 4, 0.4);
         }
         .spai-suspicious-overlay.spai-risk-high {
-            background-color: rgba(234, 67, 53, 0.15); /* Red with low opacity */
+            background-color: rgba(234, 67, 53, 0.15);
             box-shadow: inset 0 0 0 1px rgba(234, 67, 53, 0.4);
         }
         .message-in:hover .spai-suspicious-overlay,
@@ -1470,11 +1903,147 @@ function injectWhatsAppHighlightStyles() {
         .message-in:hover .spai-suspicious-overlay.spai-risk-high {
             box-shadow: inset 0 0 0 2px #ea4335;
         }
+
+        /* ===== Suspicious Text Highlighting ===== */
         .spai-suspicious-text {
             cursor: help;
         }
         .spai-suspicious-text:hover {
             opacity: 0.8;
+        }
+
+        /* ===== Message-Level Risk Badge ===== */
+        .spai-risk-badge {
+            position: absolute;
+            top: -8px;
+            right: 8px;
+            background: linear-gradient(135deg, #d32f2f 0%, #c62828 100%);
+            color: white;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 10px;
+            font-weight: 700;
+            z-index: 100;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+            letter-spacing: 0.5px;
+            animation: slideInDown 0.3s ease-out;
+        }
+        .spai-risk-badge.spai-risk-medium {
+            background: linear-gradient(135deg, #f57c00 0%, #e65100 100%);
+        }
+
+        /* ===== Loading Indicator ===== */
+        .spai-message-loading {
+            position: absolute;
+            top: 50%;
+            right: 8px;
+            transform: translateY(-50%);
+            width: 16px;
+            height: 16px;
+            z-index: 99;
+        }
+        .spai-message-loading::after {
+            content: '';
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border: 2px solid rgba(66, 133, 244, 0.3);
+            border-top-color: #4285f4;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        /* ===== Chat Sidebar Threat Indicator ===== */
+        .spai-chat-threat-indicator {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            z-index: 50;
+            animation: pulse 2s ease-in-out infinite;
+        }
+        .spai-chat-threat-indicator.spai-high {
+            background-color: #d32f2f;
+            box-shadow: 0 0 8px rgba(211, 47, 47, 0.6);
+        }
+        .spai-chat-threat-indicator.spai-medium {
+            background-color: #f57c00;
+            box-shadow: 0 0 6px rgba(245, 124, 0, 0.5);
+        }
+
+        /* ===== Warning Text (Fallback) ===== */
+        .spai-warning-text {
+            color: #d32f2f;
+            font-weight: bold;
+            font-size: 11px;
+            margin-bottom: 4px;
+            padding: 4px;
+            background: rgba(255, 255, 255, 0.5);
+            border-radius: 4px;
+        }
+
+        /* ===== Highlighted Message Container ===== */
+        .spai-highlighted-message {
+            transition: all 0.3s ease;
+        }
+        .spai-highlighted-message.spai-risk-medium {
+            background-color: rgba(255, 235, 59, 0.25) !important;
+            border-left: 4px solid #fbbc04 !important;
+        }
+        .spai-highlighted-message.spai-risk-high {
+            background-color: rgba(234, 67, 53, 0.25) !important;
+            border-left: 4px solid #ea4335 !important;
+        }
+        
+        /* ===== Highlighted Text Spans (span[dir="auto"]) ===== */
+        .spai-highlighted-text {
+            transition: all 0.3s ease;
+        }
+        .spai-highlighted-text.spai-risk-medium {
+            background-color: rgba(255, 235, 59, 0.25) !important;
+            color: #856404 !important;
+        }
+        .spai-highlighted-text.spai-risk-high {
+            background-color: rgba(234, 67, 53, 0.25) !important;
+            color: #8b0000 !important;
+        }
+        
+        /* ===== WhatsApp span[dir="auto"] specific styling ===== */
+        span[dir="auto"].spai-highlighted-text {
+            padding: 2px 4px;
+            border-radius: 3px;
+        }
+        div.spai-highlighted-message span[dir="auto"] {
+            background-color: inherit !important;
+        }
+
+        /* ===== Animations ===== */
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+                transform: scale(1);
+            }
+            50% {
+                opacity: 0.6;
+                transform: scale(1.1);
+            }
+        }
+        @keyframes slideInDown {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
     `;
     document.head.appendChild(style);

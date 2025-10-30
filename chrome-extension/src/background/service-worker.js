@@ -17,6 +17,46 @@ const sentimentAnalyzer = new SentimentAnalyzer(aiManager);
 const platformDetector = new PlatformDetector();
 const imageAnalyzer = new ImageAnalyzer(aiManager);
 
+// Analysis cache to reduce IDLE time and improve performance
+const analysisCache = new Map();
+const CACHE_SIZE_LIMIT = 50;
+
+/**
+ * Generate cache key from content (first 100 chars + hash)
+ */
+function getCacheKey(content) {
+  if (!content || typeof content !== 'string') return 'invalid';
+  const preview = content.substring(0, 100);
+  // Simple hash function
+  let hash = 0;
+  for (let i = 0; i < preview.length; i++) {
+    const char = preview.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  return `${preview.substring(0, 20)}_${Math.abs(hash).toString(36)}`;
+}
+
+/**
+ * Get cached result or null
+ */
+function getCachedResult(key) {
+  return analysisCache.get(key) || null;
+}
+
+/**
+ * Store result in cache
+ */
+function cacheResult(key, result) {
+  // Evict oldest entries if cache is full
+  if (analysisCache.size >= CACHE_SIZE_LIMIT) {
+    const firstKey = analysisCache.keys().next().value;
+    analysisCache.delete(firstKey);
+  }
+  analysisCache.set(key, result);
+  console.log(`💾 Cached analysis result (cache size: ${analysisCache.size}/${CACHE_SIZE_LIMIT})`);
+}
+
 // Extension installation and updates
 chrome.runtime.onInstalled.addListener(async (details) => {
   console.log('spAI-Defender installed:', details.reason);
@@ -398,6 +438,16 @@ async function handlePhishingDetection(data, sendResponse) {
     const title = data.title || '';
     const images = data.images || [];
     
+    // Check cache first to reduce IDLE time
+    const cacheKey = getCacheKey(content);
+    const cachedResult = getCachedResult(cacheKey);
+    
+    if (cachedResult) {
+      console.log('📦 Using cached analysis result - reducing IDLE time');
+      sendResponse(cachedResult);
+      return;
+    }
+    
     const analysis = await phishingDetector.detectPhishing(url, content, title, images);
     
     // Show badge if high risk
@@ -415,10 +465,15 @@ async function handlePhishingDetection(data, sendResponse) {
       }
     }
 
-    sendResponse({
+    const response = {
       success: true,
       analysis
-    });
+    };
+    
+    // Cache the result for future requests
+    cacheResult(cacheKey, response);
+    
+    sendResponse(response);
   } catch (error) {
     console.error('Error in phishing detection:', error);
     sendResponse({
@@ -434,12 +489,28 @@ async function handlePhishingDetection(data, sendResponse) {
 async function handleSentimentAnalysis(data, sendResponse) {
   try {
     const { content, url } = data;
+    
+    // Check cache first
+    const cacheKey = getCacheKey(content);
+    const cachedResult = getCachedResult(cacheKey);
+    
+    if (cachedResult) {
+      console.log('📦 Using cached sentiment analysis - reducing IDLE time');
+      sendResponse(cachedResult);
+      return;
+    }
+    
     const analysis = await sentimentAnalyzer.analyzeSentiment(content, url);
     
-    sendResponse({
+    const response = {
       success: true,
       analysis
-    });
+    };
+    
+    // Cache the result
+    cacheResult(cacheKey, response);
+    
+    sendResponse(response);
   } catch (error) {
     console.error('Error in sentiment analysis:', error);
     sendResponse({

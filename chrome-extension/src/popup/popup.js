@@ -762,7 +762,11 @@ async function handlePhishingScan() {
 <strong>Phishing Analysis Result:</strong>
 
 🚨 <strong>Risk Level:</strong> ${riskLevel} (${finalScore}/100)
-🎯 <strong>Phishing Detected:</strong> ${analysis.isPhishing ? 'YES' : 'NO'}
+🎯 <strong>Phishing Detected:</strong> ${
+  analysis.isPhishing ? 'YES' : 
+  (finalScore > 50 ? 'Probably' : 
+  (finalScore > 30 ? 'Possibly' : 'NO'))
+}
 ${analysis.recommendation ? `
 📋 <strong>Recommendation:</strong> ${analysis.recommendation.action || analysis.recommendation}
 ` : ''}

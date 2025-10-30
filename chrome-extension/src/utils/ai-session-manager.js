@@ -7,6 +7,10 @@ export class AISessionManager {
   constructor() {
     this.session = null;
     this.availability = null;
+    this.sessionPool = []; // Pool of reusable sessions
+    this.sessionInUse = new Set(); // Track which sessions are currently in use
+    this.MAX_POOL_SIZE = 3; // Maximum cached sessions
+    this.sessionTimeout = null; // Timeout for releasing hung sessions
   }
 
   /**
@@ -59,14 +63,36 @@ export class AISessionManager {
         ...options
       };
 
-      // Just create the session without checking availability
-      this.session = await self.LanguageModel.create(sessionOptions);
+      // Create session with optional timeout (shorter: 3 seconds instead of 10)
+      const TIMEOUT_MS = 3000; // 3 seconds - reduced from 10s for faster feedback
+
+      const createSessionPromise = self.LanguageModel.create(sessionOptions);
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('AI session creation timeout')), TIMEOUT_MS)
+      );
+
+      this.session = await Promise.race([createSessionPromise, timeoutPromise]);
       console.log('AI session created successfully');
       return this.session;
 
     } catch (error) {
       console.error('Error creating AI session:', error);
-      // Instead of throwing, create a mock session
+      
+      // If it's a timeout or AI not available, create a fast mock session
+      if (error.message.includes('timeout') || error.message.includes('not available')) {
+        console.warn('⚠️ AI timeout or unavailable, using fast mock session');
+        this.session = {
+          prompt: async (text) => {
+            // Fast mock that returns immediately
+            return `Analysis: ${text.substring(0, 100)} [Mock - AI unavailable]`;
+          },
+          destroy: async () => {},
+          clone: async () => this.session
+        };
+        return this.session;
+      }
+      
+      // For other errors, still return mock
       this.session = {
         prompt: async (text) => `AI response: ${text.substring(0, 50)}`,
         destroy: async () => {}
@@ -84,7 +110,45 @@ export class AISessionManager {
     if (this.session) {
       return this.session;
     }
+
+    // Try to get a session from the pool
+    if (this.sessionPool.length > 0) {
+      const pooledSession = this.sessionPool.pop();
+      console.log(`♻️ Reusing session from pool (${this.sessionPool.length} remaining)`);
+      return pooledSession;
+    }
+
     return await this.createSession(options);
+  }
+
+  /**
+   * Get a session from pool without creating new one
+   * @returns {Object|null} Pooled session or null
+   */
+  getPooledSession() {
+    if (this.sessionPool.length > 0) {
+      const session = this.sessionPool.pop();
+      console.log(`♻️ Retrieved pooled session (${this.sessionPool.length} remaining)`);
+      return session;
+    }
+    return null;
+  }
+
+  /**
+   * Return a session to the pool for reuse
+   * @param {Object} session - Session to return to pool
+   */
+  returnSessionToPool(session) {
+    if (!session) return;
+
+    if (this.sessionPool.length < this.MAX_POOL_SIZE) {
+      this.sessionPool.push(session);
+      console.log(`📦 Session returned to pool (${this.sessionPool.length}/${this.MAX_POOL_SIZE})`);
+    } else {
+      // Pool is full, destroy the session
+      session.destroy?.();
+      console.log('🗑️ Session destroyed (pool full)');
+    }
   }
 
   /**

@@ -16,6 +16,56 @@ export class SentimentAnalyzer {
   }
 
   /**
+   * Robustly parse JSON with common AI response formatting issues
+   */
+  robustJsonParse(jsonStr) {
+    try {
+      // First attempt: direct parse
+      return JSON.parse(jsonStr);
+    } catch (e1) {
+      try {
+        // Fix 1: Remove trailing commas before ] and }
+        const fixed1 = jsonStr.replace(/,(\s*[}\]])/g, '$1');
+        return JSON.parse(fixed1);
+      } catch (e2) {
+        try {
+          // Fix 2: Handle quotes in array items
+          const fixed2 = jsonStr.replace(/\[\s*"([^"]*)"/g, '["$1"');
+          return JSON.parse(fixed2);
+        } catch (e3) {
+          try {
+            // Fix 3: Remove comments if any
+            const fixed3 = jsonStr.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '');
+            return JSON.parse(fixed3);
+          } catch (e4) {
+            try {
+              // Fix 4: Escape unescaped newlines and tabs in string values
+              const fixed4 = jsonStr
+                .replace(/:\s*"([^"]*)\n([^"]*)"/g, ': "$1\\n$2"') // Handle newlines in values
+                .replace(/:\s*"([^"]*)\t([^"]*)"/g, ': "$1\\t$2"'); // Handle tabs in values
+              return JSON.parse(fixed4);
+            } catch (e5) {
+              try {
+                // Fix 5: Add missing commas between properties
+                // Pattern: closing quote followed by opening quote on same/different line
+                const fixed5 = jsonStr.replace(/"\s*\n\s*"/g, '",\n"')
+                  .replace(/"\s+"(?=[{[])/g, '", ')
+                  .replace(/}(?=\s*[{[])/g, '},')
+                  .replace(/](?=\s*[{[])/g, '],');
+                return JSON.parse(fixed5);
+              } catch (e6) {
+                console.warn('Could not parse JSON after 5 fix attempts. Last error:', e6.message);
+                console.warn('JSON string (first 500 chars):', jsonStr.substring(0, 500));
+                return null;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  /**
    * Analisa sentimento do conteúdo
    */
   async analyzeSentiment(text, url = '') {
@@ -62,10 +112,15 @@ Provide JSON response:
       if (jsonMatch) {
         try {
           const jsonStr = jsonMatch[0];
-          // Fix common JSON issues
-          const fixedJson = jsonStr.replace(/,(\s*[}\]])/g, '$1');
-          analysis = JSON.parse(fixedJson);
-          console.log('✅ Successfully parsed sentiment JSON');
+          // Use robust parser
+          analysis = this.robustJsonParse(jsonStr);
+          
+          if (analysis) {
+            console.log('✅ Successfully parsed sentiment JSON');
+          } else {
+            console.warn('Robust parser returned null, using fallback');
+            analysis = this.parseSentimentText(response);
+          }
         } catch (jsonError) {
           console.warn('Failed to parse JSON in analyzeSentiment:', jsonError.message);
           analysis = this.parseSentimentText(response);
@@ -204,27 +259,22 @@ Provide JSON response:
         return null;
       }
 
-      const prompt = `Analyze the sentiment and manipulation tactics in this content:
+      const prompt = `Analyze the sentiment and manipulation tactics in this content.
 
 URL: ${url}
-Content: ${text.substring(0, 3000)}
+Content: ${text.substring(0, 2000)}
 
-Focus on:
-1. Emotional manipulation techniques
-2. Psychological pressure tactics
-3. Trust-building language
-4. Urgency creation methods
-5. Social engineering indicators
-
-Provide JSON response:
+Provide VALID JSON (no newlines in strings, all strings properly escaped):
 {
-  "semanticScore": -1 to 1,
-  "manipulationTechniques": ["technique1", "technique2"],
-  "pressureTactics": ["tactic1", "tactic2"],
-  "trustMarkers": ["marker1", "marker2"],
-  "socialEngineering": true/false,
-  "overallAssessment": "description"
-}`;
+  "semanticScore": 0.5,
+  "manipulationTechniques": "technique1, technique2",
+  "pressureTactics": "tactic1, tactic2",
+  "trustMarkers": "marker1, marker2",
+  "socialEngineering": true,
+  "overallAssessment": "brief description"
+}
+
+IMPORTANT: Return ONLY valid JSON. No markdown, no extra text. Ensure all quotes are closed.`;
 
       const session = await this.aiManager.createSession({ temperature: 0.5 });
       const response = await session.prompt(prompt);
@@ -240,13 +290,15 @@ Provide JSON response:
           const jsonStr = jsonMatch[0];
           console.log('Attempting to parse JSON:', jsonStr.substring(0, 200));
           
-          // Try to fix common JSON issues
-          let fixedJson = jsonStr;
-          // Remove trailing commas before closing brackets/braces
-          fixedJson = fixedJson.replace(/,(\s*[}\]])/g, '$1');
+          // Use robust parser
+          analysis = this.robustJsonParse(jsonStr);
           
-          analysis = JSON.parse(fixedJson);
-          console.log('✅ Successfully parsed JSON');
+          if (analysis) {
+            console.log('✅ Successfully parsed JSON');
+          } else {
+            console.warn('Robust parser returned null, using fallback');
+            analysis = this.parseSentimentText(response);
+          }
         } catch (jsonError) {
           console.warn('Failed to parse JSON, trying fallback parser:', jsonError.message);
           console.log('Problematic JSON:', jsonMatch[0].substring(0, 300));
