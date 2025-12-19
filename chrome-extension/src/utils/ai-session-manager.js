@@ -7,6 +7,8 @@ export class AISessionManager {
   constructor() {
     this.session = null;
     this.availability = null;
+    this.availabilityChecked = false; // Cache availability check result
+    this.aiAvailable = false; // Track if AI is actually available
     this.sessionPool = []; // Pool of reusable sessions
     this.sessionInUse = new Set(); // Track which sessions are currently in use
     this.MAX_POOL_SIZE = 3; // Maximum cached sessions
@@ -15,46 +17,119 @@ export class AISessionManager {
 
   /**
    * Check if the AI model is available
-   * @returns {Promise<string>} Availability status
+   * Actually checks the Chrome Built-in AI LanguageModel API
+   * @returns {Promise<string>} Availability status: 'readily', 'after-download', or 'no'
    */
   async checkAvailability() {
-    // Always return ready - don't check, just use it
-    return 'readily';
+    // Return cached result if already checked
+    if (this.availabilityChecked && this.availability) {
+      return this.availability;
+    }
+
+    try {
+      // Check if LanguageModel API exists
+      if (typeof self === 'undefined' || !self.LanguageModel) {
+        console.warn('🤖 Chrome Built-in AI: NOT AVAILABLE (LanguageModel API not found)');
+        this.availability = 'no';
+        this.aiAvailable = false;
+        this.availabilityChecked = true;
+        return 'no';
+      }
+
+      // Check actual capabilities with timeout
+      const TIMEOUT_MS = 2000;
+      const capabilitiesPromise = self.LanguageModel.capabilities();
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Capabilities check timeout')), TIMEOUT_MS)
+      );
+
+      const capabilities = await Promise.race([capabilitiesPromise, timeoutPromise]);
+      this.availability = capabilities?.available || 'no';
+      this.aiAvailable = this.availability === 'readily' || this.availability === 'after-download';
+      this.availabilityChecked = true;
+
+      console.log(`🤖 Chrome Built-in AI: ${this.availability.toUpperCase()}`);
+      return this.availability;
+
+    } catch (error) {
+      console.warn('🤖 Chrome Built-in AI: NOT AVAILABLE -', error.message);
+      this.availability = 'no';
+      this.aiAvailable = false;
+      this.availabilityChecked = true;
+      return 'no';
+    }
+  }
+
+  /**
+   * Check if AI is available (sync getter after async check)
+   * @returns {boolean} Whether AI is available
+   */
+  isAIAvailable() {
+    return this.aiAvailable;
   }
 
   /**
    * Get AI model capabilities
+   * Actually calls the Chrome Built-in AI API
    * @returns {Promise<Object>} Model capabilities
    */
   async getCapabilities() {
     try {
-      // Return default capabilities assuming AI is available
+      // First check availability
+      const availability = await this.checkAvailability();
+
+      if (availability === 'no' || !self.LanguageModel) {
+        return {
+          available: false,
+          availability: 'no',
+          defaultTemperature: 0.8,
+          defaultTopK: 40,
+          maxTopK: 40,
+          error: 'Chrome Built-in AI not available'
+        };
+      }
+
+      // Get real capabilities from the API
+      const capabilities = await self.LanguageModel.capabilities();
       return {
         available: true,
-        availability: 'readily',
-        defaultTemperature: 0.8,
-        defaultTopK: 40,
-        maxTopK: 40
+        availability: capabilities?.available || 'no',
+        defaultTemperature: capabilities?.defaultTemperature || 0.8,
+        defaultTopK: capabilities?.defaultTopK || 40,
+        maxTopK: capabilities?.maxTopK || 40
       };
+
     } catch (error) {
-      console.error('Error getting AI capabilities:', error);
-      // Return default capabilities even on error
+      console.error('🤖 Error getting AI capabilities:', error);
       return {
-        available: true,
-        availability: 'readily',
+        available: false,
+        availability: 'no',
         defaultTemperature: 0.8,
         defaultTopK: 40,
-        maxTopK: 40
+        maxTopK: 40,
+        error: error.message
       };
     }
   }
 
   /**
    * Create a new AI session
+   * Throws error if AI is not available (no mock fallback)
    * @param {Object} options - Session options
    * @returns {Promise<Object>} AI session
+   * @throws {Error} If AI is not available
    */
   async createSession(options = {}) {
+    // First check availability - this prevents wasting time on unavailable AI
+    const availability = await this.checkAvailability();
+
+    if (availability === 'no') {
+      const error = new Error('AI_UNAVAILABLE: Chrome Built-in AI is not available');
+      error.code = 'AI_UNAVAILABLE';
+      console.warn('🤖 Cannot create AI session:', error.message);
+      throw error;
+    }
+
     try {
       // Default session options
       const sessionOptions = {
@@ -63,41 +138,30 @@ export class AISessionManager {
         ...options
       };
 
-      // Create session with optional timeout (shorter: 3 seconds instead of 10)
-      const TIMEOUT_MS = 3000; // 3 seconds - reduced from 10s for faster feedback
+      // Create session with timeout (3 seconds for faster feedback)
+      const TIMEOUT_MS = 3000;
 
       const createSessionPromise = self.LanguageModel.create(sessionOptions);
       const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('AI session creation timeout')), TIMEOUT_MS)
+        setTimeout(() => reject(new Error('AI session creation timeout (3s)')), TIMEOUT_MS)
       );
 
       this.session = await Promise.race([createSessionPromise, timeoutPromise]);
-      console.log('AI session created successfully');
+      console.log('🤖 AI session created successfully');
       return this.session;
 
     } catch (error) {
-      console.error('Error creating AI session:', error);
-      
-      // If it's a timeout or AI not available, create a fast mock session
-      if (error.message.includes('timeout') || error.message.includes('not available')) {
-        console.warn('⚠️ AI timeout or unavailable, using fast mock session');
-        this.session = {
-          prompt: async (text) => {
-            // Fast mock that returns immediately
-            return `Analysis: ${text.substring(0, 100)} [Mock - AI unavailable]`;
-          },
-          destroy: async () => {},
-          clone: async () => this.session
-        };
-        return this.session;
-      }
-      
-      // For other errors, still return mock
-      this.session = {
-        prompt: async (text) => `AI response: ${text.substring(0, 50)}`,
-        destroy: async () => {}
-      };
-      return this.session;
+      // Mark AI as unavailable on any creation error
+      this.aiAvailable = false;
+      this.availability = 'no';
+
+      // Create a descriptive error
+      const wrappedError = new Error(`AI_SESSION_FAILED: ${error.message}`);
+      wrappedError.code = 'AI_SESSION_FAILED';
+      wrappedError.originalError = error;
+
+      console.error('🤖 AI session creation failed:', error.message);
+      throw wrappedError; // Throw instead of returning mock - let callers handle it
     }
   }
 

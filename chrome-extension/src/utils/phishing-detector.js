@@ -13,6 +13,95 @@ export class PhishingDetector {
     this.threatsToday = 0;
     this.riskLevels = { LOW: 0, MEDIUM: 1, MEDIUM_HIGH: 2, HIGH: 3, CRITICAL: 4 };
     this.hybridScorer = new HybridScorer();
+
+    // Quick rule-based patterns for instant detection (no AI needed)
+    this.quickPatterns = {
+      // High-risk patterns (score 80-100)
+      critical: [
+        /conta.*suspens[ao]/i,           // account suspended (PT)
+        /account.*suspend/i,              // account suspended (EN)
+        /conta.*bloquead[ao]/i,           // account blocked (PT)
+        /account.*block/i,                // account blocked (EN)
+        /verifi(que|car).*conta/i,        // verify account (PT)
+        /verify.*account/i,               // verify account (EN)
+        /clique.*agora/i,                 // click now (PT)
+        /click.*now/i,                    // click now (EN)
+        /ação.*imediata/i,                // immediate action (PT)
+        /immediate.*action/i,             // immediate action (EN)
+        /sua.*senha.*expirou/i,           // your password expired (PT)
+        /password.*expired/i,             // password expired (EN)
+        /acesso.*não.*autorizado/i,       // unauthorized access (PT)
+        /unauthorized.*access/i,          // unauthorized access (EN)
+        /atividade.*suspeita/i,           // suspicious activity (PT)
+        /suspicious.*activity/i,          // suspicious activity (EN)
+        /fraude.*detectad/i,              // fraud detected (PT)
+        /fraud.*detected/i,               // fraud detected (EN)
+      ],
+      // Medium-risk patterns (score 50-79)
+      warning: [
+        /atenção/i,                       // attention (PT)
+        /attention/i,                     // attention (EN)
+        /urgente/i,                       // urgent (PT)
+        /urgent/i,                        // urgent (EN)
+        /oportunidade.*única/i,           // unique opportunity (PT)
+        /unique.*opportunity/i,           // unique opportunity (EN)
+        /última.*chance/i,                // last chance (PT)
+        /last.*chance/i,                  // last chance (EN)
+        /ganhe.*dinheiro/i,               // earn money (PT)
+        /earn.*money/i,                   // earn money (EN)
+        /prêmio/i,                        // prize (PT)
+        /prize/i,                         // prize (EN)
+        /grátis/i,                        // free (PT)
+        /free.*gift/i,                    // free gift (EN)
+        /limitad[ao]/i,                   // limited (PT)
+        /limited.*offer/i,                // limited offer (EN)
+      ]
+    };
+  }
+
+  /**
+   * Quick rule-based detection (instant, no AI)
+   * @param {string} content - Text to analyze
+   * @returns {Object} Quick detection result
+   */
+  quickDetect(content) {
+    if (!content || typeof content !== 'string') {
+      return { score: 0, level: 'SAFE', matches: [] };
+    }
+
+    const matches = [];
+    let maxScore = 0;
+
+    // Check critical patterns (80-100 score)
+    for (const pattern of this.quickPatterns.critical) {
+      if (pattern.test(content)) {
+        matches.push({ pattern: pattern.source, severity: 'CRITICAL' });
+        maxScore = Math.max(maxScore, 85);
+      }
+    }
+
+    // Check warning patterns (50-79 score)
+    for (const pattern of this.quickPatterns.warning) {
+      if (pattern.test(content)) {
+        matches.push({ pattern: pattern.source, severity: 'WARNING' });
+        maxScore = Math.max(maxScore, 55);
+      }
+    }
+
+    // Boost score if multiple matches
+    if (matches.length >= 3) {
+      maxScore = Math.min(100, maxScore + 15);
+    } else if (matches.length >= 2) {
+      maxScore = Math.min(100, maxScore + 10);
+    }
+
+    const level = maxScore >= 80 ? 'HIGH' :
+                  maxScore >= 50 ? 'MEDIUM' :
+                  maxScore >= 30 ? 'LOW' : 'SAFE';
+
+    console.log(`🚨 Quick detect: score=${maxScore}, matches=${matches.length}`, matches.map(m => m.pattern));
+
+    return { score: maxScore, level, matches };
   }
 
   /**
@@ -48,21 +137,72 @@ export class PhishingDetector {
    */
   async detectPhishing(url, content, title = '', images = [], useAdvanced = true) {
     try {
-      // Use advanced detection if requested and available
-      if (useAdvanced) {
-        try {
-          return await this.detectPhishingAdvanced(url, content, title, images);
-        } catch (error) {
-          console.warn('Advanced detection failed, falling back to simple:', error);
-          // Continue to simple detection
-        }
+      // STEP 1: Run quick rule-based detection FIRST (instant, no AI)
+      const quickResult = this.quickDetect(content);
+      console.log(`🔍 Quick detection result: score=${quickResult.score}, level=${quickResult.level}`);
+
+      // If quick detection finds HIGH risk, return immediately for speed
+      if (quickResult.score >= 80) {
+        console.log('⚡ HIGH RISK detected by quick patterns - returning immediately');
+        return {
+          riskScore: quickResult.score,
+          finalRiskScore: quickResult.score,
+          riskLevel: quickResult.level,
+          isPhishing: true,
+          redFlags: quickResult.matches.map(m => m.pattern),
+          suspiciousPhrases: quickResult.matches.map(m => m.pattern),
+          confidence: 90,
+          detectionMethod: 'quick_pattern'
+        };
       }
 
-      // Fall back to simple detection (reuse the helper method)
-      return await this._detectPhishingSimple(url, content, title, images);
+      // STEP 2: Run advanced/simple detection
+      let result;
+      if (useAdvanced) {
+        try {
+          result = await this.detectPhishingAdvanced(url, content, title, images);
+        } catch (error) {
+          console.warn('Advanced detection failed, falling back to simple:', error);
+          result = await this._detectPhishingSimple(url, content, title, images);
+        }
+      } else {
+        result = await this._detectPhishingSimple(url, content, title, images);
+      }
+
+      // STEP 3: Ensure quick detection score is not ignored
+      // If quick detection found medium risk but AI returned 0, use quick score
+      const aiScore = result.finalRiskScore || result.riskScore || 0;
+      if (quickResult.score > aiScore) {
+        console.log(`⚠️ Quick detection score (${quickResult.score}) > AI score (${aiScore}), using quick score`);
+        result.riskScore = quickResult.score;
+        result.finalRiskScore = quickResult.score;
+        result.riskLevel = quickResult.level;
+        result.isPhishing = quickResult.score >= 50;
+        result.suspiciousPhrases = (result.suspiciousPhrases || []).concat(quickResult.matches.map(m => m.pattern));
+        result.detectionMethod = 'quick_pattern_override';
+      }
+
+      return result;
 
     } catch (error) {
       console.error('Error in phishing detection:', error);
+
+      // Even on error, try quick detection as fallback
+      const quickResult = this.quickDetect(content);
+      if (quickResult.score > 0) {
+        return {
+          riskScore: quickResult.score,
+          finalRiskScore: quickResult.score,
+          riskLevel: quickResult.level,
+          isPhishing: quickResult.score >= 50,
+          redFlags: quickResult.matches.map(m => m.pattern),
+          suspiciousPhrases: quickResult.matches.map(m => m.pattern),
+          confidence: 70,
+          detectionMethod: 'quick_pattern_fallback',
+          error: error.message
+        };
+      }
+
       return {
         riskScore: 0,
         riskLevel: 'UNKNOWN',
