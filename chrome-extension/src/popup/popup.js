@@ -98,6 +98,29 @@ async function autoExtractContent() {
   console.log('Auto-extracting content for:', currentTab.url);
   
   try {
+    // For WhatsApp, try to get the latest snapshot first
+    if (currentTab.url && currentTab.url.includes('web.whatsapp.com')) {
+      console.log('📸 Attempting to load WhatsApp snapshot...');
+      
+      const snapshotResponse = await sendMessage({
+        type: 'GET_LAST_WHATSAPP_SNAPSHOT'
+      });
+
+      if (snapshotResponse.success && snapshotResponse.snapshot) {
+        const snapshot = snapshotResponse.snapshot;
+        
+        // Verify snapshot is from the current tab
+        if (snapshot.tabId === currentTab.id) {
+          extractedContent = snapshot.content;
+          console.log(`✅ WhatsApp snapshot loaded (${snapshot.chatName}, trigger: ${snapshot.trigger})`);
+          return; // Use snapshot, skip GET_TAB_CONTENT
+        } else {
+          console.log('⚠️ Snapshot is from a different tab, falling back to GET_TAB_CONTENT');
+        }
+      }
+    }
+
+    // Fallback: standard extraction
     const response = await sendMessage({
       type: 'GET_TAB_CONTENT',
       tabId: currentTab.id

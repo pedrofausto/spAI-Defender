@@ -3,7 +3,340 @@
  * Injected into web pages to extract and monitor content
  */
 
-import { SecurityBadge } from './security-badge.js';
+// =====================================================
+// SecurityBadge Class (Inlined to avoid ES Module issues)
+// =====================================================
+class SecurityBadge {
+  constructor() {
+    this.badge = null;
+    this.isVisible = false;
+    this.currentRiskLevel = 'UNKNOWN';
+  }
+
+  create(riskLevel, riskScore, indicators = []) {
+    if (this.badge) {
+      this.remove();
+    }
+
+    this.currentRiskLevel = riskLevel;
+
+    // Get browser language for translations
+    const lang = navigator.language.toLowerCase();
+    const translations = this.getTranslations(lang);
+
+    const badge = document.createElement('div');
+    badge.id = 'spai-security-badge';
+    badge.className = `spai-badge spai-risk-${riskLevel.toLowerCase()}`;
+
+    // CSP-SAFE: No inline onclick handlers - attach listeners programmatically
+    // Removed "View Details" button as requested
+    badge.innerHTML = `
+      <div class="spai-badge-header">
+        <span class="spai-badge-icon">🛡️</span>
+        <span class="spai-badge-title">${translations.title}</span>
+        <button class="spai-badge-close">×</button>
+      </div>
+      <div class="spai-badge-body">
+        <div class="spai-risk-indicator">
+          <div class="spai-risk-level">${translations.risk}: ${translations.levels[riskLevel] || riskLevel}</div>
+          <div class="spai-risk-score">${riskScore}/100</div>
+          <div class="spai-risk-bar">
+            <div class="spai-risk-fill" style="width: ${riskScore}%"></div>
+          </div>
+        </div>
+        ${indicators.length > 0 ? `
+          <div class="spai-indicators">
+            ${indicators.slice(0, 3).map(ind => `<span class="spai-indicator">${ind}</span>`).join('')}
+          </div>
+        ` : ''}
+      </div>
+    `;
+
+    document.body.appendChild(badge);
+    this.badge = badge;
+    this.isVisible = true;
+
+    // CSP-SAFE: Attach click handlers programmatically (works under WhatsApp CSP)
+    const closeBtn = badge.querySelector('.spai-badge-close');
+    if (closeBtn) {
+      closeBtn.addEventListener('click', () => {
+        console.log('🗙 Badge close button clicked');
+        this.remove();
+      });
+    } else {
+      console.warn('⚠️ SecurityBadge: close button not found in DOM');
+    }
+
+    if (riskLevel === 'LOW' && riskScore < 30) {
+      setTimeout(() => this.remove(), 10000);
+    }
+
+    this.injectStyles();
+  }
+
+  getTranslations(lang) {
+    const translations = {
+      'pt': {
+        title: 'spAI Segurança',
+        risk: 'Risco',
+        levels: { 'LOW': 'BAIXO', 'MEDIUM': 'MÉDIO', 'HIGH': 'ALTO', 'CRITICAL': 'CRÍTICO' }
+      },
+      'pt-br': {
+        title: 'spAI Segurança',
+        risk: 'Risco',
+        levels: { 'LOW': 'BAIXO', 'MEDIUM': 'MÉDIO', 'HIGH': 'ALTO', 'CRITICAL': 'CRÍTICO' }
+      },
+      'es': {
+        title: 'spAI Seguridad',
+        risk: 'Riesgo',
+        levels: { 'LOW': 'BAJO', 'MEDIUM': 'MEDIO', 'HIGH': 'ALTO', 'CRITICAL': 'CRÍTICO' }
+      },
+      'fr': {
+        title: 'spAI Sécurité',
+        risk: 'Risque',
+        levels: { 'LOW': 'FAIBLE', 'MEDIUM': 'MOYEN', 'HIGH': 'ÉLEVÉ', 'CRITICAL': 'CRITIQUE' }
+      },
+      'de': {
+        title: 'spAI Sicherheit',
+        risk: 'Risiko',
+        levels: { 'LOW': 'NIEDRIG', 'MEDIUM': 'MITTEL', 'HIGH': 'HOCH', 'CRITICAL': 'KRITISCH' }
+      },
+      'it': {
+        title: 'spAI Sicurezza',
+        risk: 'Rischio',
+        levels: { 'LOW': 'BASSO', 'MEDIUM': 'MEDIO', 'HIGH': 'ALTO', 'CRITICAL': 'CRITICO' }
+      },
+      'ja': {
+        title: 'spAI セキュリティ',
+        risk: 'リスク',
+        levels: { 'LOW': '低', 'MEDIUM': '中', 'HIGH': '高', 'CRITICAL': '重大' }
+      },
+      'ko': {
+        title: 'spAI 보안',
+        risk: '위험',
+        levels: { 'LOW': '낮음', 'MEDIUM': '중간', 'HIGH': '높음', 'CRITICAL': '심각' }
+      },
+      'zh': {
+        title: 'spAI 安全',
+        risk: '风险',
+        levels: { 'LOW': '低', 'MEDIUM': '中', 'HIGH': '高', 'CRITICAL': '严重' }
+      },
+      'zh-cn': {
+        title: 'spAI 安全',
+        risk: '风险',
+        levels: { 'LOW': '低', 'MEDIUM': '中', 'HIGH': '高', 'CRITICAL': '严重' }
+      },
+      'ru': {
+        title: 'spAI Безопасность',
+        risk: 'Риск',
+        levels: { 'LOW': 'НИЗКИЙ', 'MEDIUM': 'СРЕДНИЙ', 'HIGH': 'ВЫСОКИЙ', 'CRITICAL': 'КРИТИЧЕСКИЙ' }
+      }
+    };
+
+    // Default to English
+    const defaultTranslation = {
+      title: 'spAI Security',
+      risk: 'Risk',
+      levels: { 'LOW': 'LOW', 'MEDIUM': 'MEDIUM', 'HIGH': 'HIGH', 'CRITICAL': 'CRITICAL' }
+    };
+
+    // Try exact match first, then language prefix
+    return translations[lang] || translations[lang.split('-')[0]] || defaultTranslation;
+  }
+
+  remove() {
+    if (this.badge) {
+      this.badge.remove();
+      this.badge = null;
+      this.isVisible = false;
+    }
+  }
+
+  update(riskLevel, riskScore, indicators = []) {
+    if (!this.badge) {
+      this.create(riskLevel, riskScore, indicators);
+      return;
+    }
+
+    this.currentRiskLevel = riskLevel;
+    const body = this.badge.querySelector('.spai-badge-body');
+
+    if (body) {
+      body.innerHTML = `
+        <div class="spai-risk-indicator">
+          <div class="spai-risk-level">Risk: ${riskLevel}</div>
+          <div class="spai-risk-score">${riskScore}/100</div>
+          <div class="spai-risk-bar">
+            <div class="spai-risk-fill" style="width: ${riskScore}%"></div>
+          </div>
+        </div>
+        ${indicators.length > 0 ? `
+          <div class="spai-indicators">
+            ${indicators.slice(0, 3).map(ind => `<span class="spai-indicator">${ind}</span>`).join('')}
+          </div>
+        ` : ''}
+        <div class="spai-badge-footer">
+          <button class="spai-action-btn">View Details</button>
+        </div>
+      `;
+    }
+  }
+
+  injectStyles() {
+    if (document.getElementById('spai-badge-styles')) {
+      return;
+    }
+
+    const style = document.createElement('style');
+    style.id = 'spai-badge-styles';
+    style.textContent = `
+      #spai-security-badge {
+        position: fixed;
+        top: 80px;
+        right: 20px;
+        width: 280px;
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+        z-index: 10000;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        animation: slideIn 0.3s ease;
+      }
+
+      @keyframes slideIn {
+        from { transform: translateX(320px); opacity: 0; }
+        to { transform: translateX(0); opacity: 1; }
+      }
+
+      #spai-security-badge .spai-badge-header {
+        display: flex;
+        align-items: center;
+        padding: 12px 16px;
+        border-bottom: 1px solid #e0e0e0;
+        background: #f8f9fa;
+        border-radius: 12px 12px 0 0;
+      }
+
+      #spai-security-badge .spai-badge-icon {
+        font-size: 20px;
+        margin-right: 8px;
+      }
+
+      #spai-security-badge .spai-badge-title {
+        flex: 1;
+        font-weight: 600;
+        font-size: 14px;
+        color: #202124;
+      }
+
+      #spai-security-badge .spai-badge-close {
+        background: none;
+        border: none;
+        font-size: 20px;
+        cursor: pointer;
+        color: #5f6368;
+        padding: 0;
+        width: 24px;
+        height: 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 50%;
+      }
+
+      #spai-security-badge .spai-badge-close:hover {
+        background: #e0e0e0;
+      }
+
+      #spai-security-badge .spai-badge-body {
+        padding: 16px;
+      }
+
+      #spai-security-badge .spai-risk-indicator {
+        margin-bottom: 12px;
+      }
+
+      #spai-security-badge .spai-risk-level {
+        font-size: 16px;
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+
+      #spai-security-badge .spai-risk-score {
+        font-size: 12px;
+        color: #5f6368;
+        margin-bottom: 8px;
+      }
+
+      #spai-security-badge .spai-risk-bar {
+        height: 6px;
+        background: #e0e0e0;
+        border-radius: 3px;
+        overflow: hidden;
+      }
+
+      #spai-security-badge .spai-risk-fill {
+        height: 100%;
+        transition: width 0.3s ease;
+      }
+
+      #spai-security-badge.spai-risk-low .spai-risk-level { color: #34a853; }
+      #spai-security-badge.spai-risk-low .spai-risk-fill { background: #34a853; }
+
+      #spai-security-badge.spai-risk-medium .spai-risk-level { color: #fbbc04; }
+      #spai-security-badge.spai-risk-medium .spai-risk-fill { background: #fbbc04; }
+
+      #spai-security-badge.spai-risk-high .spai-risk-level { color: #ea4335; }
+      #spai-security-badge.spai-risk-high .spai-risk-fill { background: #ea4335; }
+
+      #spai-security-badge.spai-risk-critical .spai-risk-level { color: #d93025; }
+      #spai-security-badge.spai-risk-critical .spai-risk-fill { background: #d93025; }
+
+      #spai-security-badge .spai-indicators {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-bottom: 12px;
+      }
+
+      #spai-security-badge .spai-indicator {
+        font-size: 11px;
+        padding: 4px 8px;
+        background: #f1f3f4;
+        border-radius: 4px;
+        color: #5f6368;
+      }
+
+      #spai-security-badge .spai-badge-footer {
+        margin-top: 12px;
+        padding-top: 12px;
+        border-top: 1px solid #e0e0e0;
+      }
+
+      #spai-security-badge .spai-action-btn {
+        width: 100%;
+        padding: 8px 12px;
+        background: #4285f4;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background 0.2s;
+      }
+
+      #spai-security-badge .spai-action-btn:hover {
+        background: #3367d6;
+      }
+    `;
+
+    document.head.appendChild(style);
+  }
+}
+// =====================================================
+// End SecurityBadge Class
+// =====================================================
 
 // State management
 let observerActive = false;
@@ -17,6 +350,7 @@ let imageOverlaysAdded = false; // Track if image overlays are already added
  */
 function init() {
   console.log('spAI-Defender content script loaded on:', window.location.href);
+  console.log('spAI-Defender: Hostname is:', window.location.hostname);
 
   // Listen for messages from background script
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -31,8 +365,16 @@ function init() {
     title: document.title
   });
 
-  if (window.location.hostname === 'web.whatsapp.com') {
-    initializeWhatsAppObserver();
+  const isWhatsApp = window.location.hostname === 'web.whatsapp.com';
+  console.log('spAI-Defender: Is WhatsApp?', isWhatsApp);
+
+  if (isWhatsApp) {
+    try {
+      console.log('spAI-Defender: Calling initializeWhatsAppObserver...');
+      initializeWhatsAppObserver();
+    } catch (error) {
+      console.error('spAI-Defender: Error in initializeWhatsAppObserver:', error);
+    }
   } else {
     // Auto-analyze page when loaded
     autoAnalyzePage();
@@ -160,6 +502,76 @@ function extractWhatsAppContent(sendResponse) {
         console.error('Error extracting WhatsApp content:', error);
         sendResponse({ success: false, error: error.message });
     }
+}
+
+/**
+ * Automatically publish WhatsApp chat snapshot to background for storage
+ * @param {string} trigger - What triggered this snapshot ('chat_change', 'new_message', 'manual')
+ */
+let lastSnapshotPublishTime = 0;
+let snapshotPublishTimeout = null;
+const SNAPSHOT_PUBLISH_DEBOUNCE = 500; // ms
+
+function publishWhatsAppSnapshot(trigger) {
+    // Debounce to avoid spamming storage/messages
+    clearTimeout(snapshotPublishTimeout);
+    snapshotPublishTimeout = setTimeout(() => {
+        try {
+            const now = Date.now();
+            // Throttle: don't publish more than once per 500ms
+            if (now - lastSnapshotPublishTime < SNAPSHOT_PUBLISH_DEBOUNCE) {
+                console.log(`⏱️ Snapshot publish throttled (trigger: ${trigger})`);
+                return;
+            }
+            lastSnapshotPublishTime = now;
+
+            console.log(`📸 Publishing WhatsApp snapshot (trigger: ${trigger})...`);
+            
+            const chatInfo = extractWhatsAppChatInfo();
+            const messages = extractFullWhatsAppConversation();
+            const conversationText = messages.map(m => `${m.sender}: ${m.text}`).join('\n');
+
+            const content = {
+                url: window.location.href,
+                title: document.title,
+                timestamp: new Date().toISOString(),
+                bodyText: conversationText,
+                headings: chatInfo.chatName !== 'Unknown Chat' 
+                    ? [{ level: 1, text: `Chat with ${chatInfo.chatName}` }] 
+                    : [],
+                paragraphs: messages.map(m => m.text),
+                links: extractWhatsAppLinks(),
+                images: extractImages(),
+                stats: {
+                    wordCount: conversationText.split(/\s+/).filter(Boolean).length,
+                    paragraphCount: messages.length,
+                    linkCount: extractWhatsAppLinks().length,
+                    imageCount: extractImages().length
+                },
+                lists: [],
+                tables: [],
+                meta: extractMetadata(),
+                structure: analyzeStructure()
+            };
+
+            // Send to background for storage
+            chrome.runtime.sendMessage({
+                type: 'WHATSAPP_CHAT_SNAPSHOT',
+                data: {
+                    trigger,
+                    chatId: typeof currentChatId !== 'undefined' ? currentChatId : null,
+                    chatName: chatInfo.chatName,
+                    content
+                }
+            }).then(() => {
+                console.log(`✅ Snapshot published successfully (${messages.length} messages)`);
+            }).catch(err => {
+                console.warn('⚠️ Failed to publish snapshot:', err.message);
+            });
+        } catch (error) {
+            console.error('❌ Error in publishWhatsAppSnapshot:', error.message);
+        }
+    }, SNAPSHOT_PUBLISH_DEBOUNCE);
 }
 
 /**
@@ -1093,6 +1505,9 @@ function initializeWhatsAppObserver() {
     console.log('🎯 Chat changed to:', chatTitle || 'Unknown');
     currentChatId = newChatId;
 
+    // AUTO-EXTRACT: Publish snapshot on chat change
+    publishWhatsAppSnapshot('chat_change');
+
     // Check per-chat cooldown
     const now = Date.now();
     const lastChatAnalysis = chatCooldowns.get(newChatId) || 0;
@@ -1144,6 +1559,8 @@ function initializeWhatsAppObserver() {
 
   // Lightweight observer for new messages only
   const onChatUpdate = () => {
+    // AUTO-EXTRACT: Publish snapshot on new message
+    publishWhatsAppSnapshot('new_message');
     scheduleAnalysis();
   };
 
@@ -1303,11 +1720,13 @@ async function analyzeAndHighlightMessages() {
         return;
     }
 
+    let lockTimeoutId = null; // Declare outside try block for finally access
+
     try {
         autoAnalysisInProgress = true;
 
         // SAFETY: Set a timeout to force-release the lock if analysis hangs
-        const lockTimeoutId = setTimeout(() => {
+        lockTimeoutId = setTimeout(() => {
             if (autoAnalysisInProgress) {
                 console.warn('⚠️ Analysis lock timeout (30s) - force releasing');
                 autoAnalysisInProgress = false;
@@ -1323,9 +1742,16 @@ async function analyzeAndHighlightMessages() {
             return;
         }
         
-        // Filter only unanalyzed incoming messages (performance optimization)
+        // Enhanced debugging: Count messages by direction
+        const incomingCount = messages.filter(m => m.direction === 'in').length;
+        const outgoingCount = messages.filter(m => m.direction === 'out').length;
+        const unknownCount = messages.filter(m => m.direction === 'unknown').length;
+        console.log(`📊 Message breakdown: ${incomingCount} incoming, ${outgoingCount} outgoing, ${unknownCount} unknown`);
+        
+        // FIX: Analyze ALL messages (both incoming and outgoing), not just incoming
+        // RETRY-SAFE: Exclude both 'true' (already analyzed) and 'pending' (currently analyzing)
         const unanalyzedMessages = messages.filter(msg => 
-            msg.direction === 'in' && msg.element.dataset.spaiAnalyzed !== 'true'
+            msg.element.dataset.spaiAnalyzed !== 'true' && msg.element.dataset.spaiAnalyzed !== 'pending'
         );
         
         if (unanalyzedMessages.length === 0) {
@@ -1343,31 +1769,68 @@ async function analyzeAndHighlightMessages() {
             const batch = unanalyzedMessages.slice(i, i + BATCH_SIZE);
             
             // Process batch
-            await Promise.all(batch.map(async (message) => {
+            await Promise.all(batch.map(async (message, batchIndex) => {
                 try {
-                    message.element.dataset.spaiAnalyzed = 'true'; // Mark as checked immediately
-                    
-                    const response = await chrome.runtime.sendMessage({
+                    // RETRY-SAFE: Mark as pending (not 'true' yet) to allow retry on failures
+                    message.element.dataset.spaiAnalyzed = 'pending';
+
+                    // Enhanced debugging: Log message being analyzed
+                    const msgPreview = message.text.substring(0, 50) + (message.text.length > 50 ? '...' : '');
+                    console.log(`🔍 Analyzing [${message.direction}]: "${msgPreview}"`);
+
+                    // Add timeout to prevent hanging forever
+                    const sendMessageWithTimeout = (msg, timeoutMs = 10000) => {
+                        return Promise.race([
+                            chrome.runtime.sendMessage(msg),
+                            new Promise((_, reject) =>
+                                setTimeout(() => reject(new Error('Message timeout after ' + timeoutMs + 'ms')), timeoutMs)
+                            )
+                        ]);
+                    };
+
+                    console.log('📤 Sending DETECT_PHISHING to background...');
+                    const response = await sendMessageWithTimeout({
                         type: 'DETECT_PHISHING',
-                        data: { content: message.text }
+                        data: {
+                            content: message.text,
+                            url: window.location.href,
+                            title: `WhatsApp Message from ${message.sender || 'Unknown'}`
+                        }
                     });
+                    console.log('📥 Response received:', response ? 'success' : 'empty');
 
                     if (response?.success && response.analysis) {
                         const riskScore = response.analysis.finalRiskScore || response.analysis.riskScore || 0;
+                        
+                        // RETRY-SAFE: Only mark as analyzed after successful response
+                        message.element.dataset.spaiAnalyzed = 'true';
+                        
+                        // Enhanced debugging: Always log risk score
+                        console.log(`📈 Risk score for message: ${riskScore} (threshold: 30)`);
 
                         // OPTIMIZED: Lowered threshold from 50 to 30 for better visibility of suspicious content
                         if (riskScore > 30) {
-                            console.log(`⚠️ Suspicious message detected (risk: ${riskScore})`);
+                            console.log(`⚠️ Suspicious message detected (risk: ${riskScore}) - WILL HIGHLIGHT`);
                             const suspiciousPhrases = response.analysis.suspiciousPhrases || [];
+                            console.log(`🔴 Suspicious phrases found: ${suspiciousPhrases.length > 0 ? suspiciousPhrases.join(', ') : 'none'}`);
 
                             // Apply highlight in requestAnimationFrame to avoid forced reflow
                             requestAnimationFrame(() => {
+                                console.log('🎨 Calling highlightSuspiciousMessage...');
                                 highlightSuspiciousMessage(message.element, riskScore, suspiciousPhrases);
                             });
+                        } else {
+                            console.log(`✅ Message is safe (risk: ${riskScore} <= 30)`);
                         }
                         analyzedCount++;
+                    } else {
+                        // RETRY-SAFE: Remove flag on failure to allow retry
+                        delete message.element.dataset.spaiAnalyzed;
+                        console.warn('⚠️ No analysis response received for message (will retry later)');
                     }
                 } catch (err) {
+                    // RETRY-SAFE: Remove flag on exception to allow retry
+                    delete message.element.dataset.spaiAnalyzed;
                     console.warn('Error analyzing individual message:', err.message);
                 }
             }));
@@ -1497,40 +1960,68 @@ async function analyzeCurrentWhatsAppChat() {
  * @param {Array<string>} suspiciousPhrases Optional array of suspicious phrases to highlight specifically.
  */
 function highlightSuspiciousMessage(element, riskScore, suspiciousPhrases = []) {
-    if (!element) return;
-
-    console.log('🔴 highlightSuspiciousMessage called with:', { riskScore, phrasesCount: suspiciousPhrases?.length || 0 });
-
-    let riskLevel = 'medium';
-    if (riskScore > 75) {
-        riskLevel = 'high';
-    }
-
-    // Store risk level on the element for sidebar indicator to use
-    element.dataset.spaiRiskLevel = riskLevel;
-    element.dataset.spaiRiskScore = riskScore;
-
-    // If we have specific suspicious phrases, highlight those specifically
-    if (suspiciousPhrases && suspiciousPhrases.length > 0) {
-        console.log('💡 Using phrase-specific highlighting');
-        highlightSpecificPhrases(element, suspiciousPhrases, riskLevel, riskScore);
-    } else {
-        // Fallback: highlight entire message
-        console.log('⚠️ No phrases provided, using full message overlay');
-        const overlay = document.createElement('div');
-        overlay.className = 'spai-suspicious-overlay';
-        overlay.classList.add(`spai-risk-${riskLevel}`);
-        overlay.title = `spAI-Defender Warning: This message has a risk score of ${riskScore}/100. It may be a phishing attempt or a scam.`;
-        
-        // Ensure the message container is positioned to contain the overlay
-        const messageContainer = element.querySelector('div[role="application"]');
-        if (messageContainer) {
-            messageContainer.style.position = 'relative';
-            messageContainer.appendChild(overlay);
-        } else {
-            element.style.position = 'relative';
-            element.appendChild(overlay);
+    try {
+        if (!element) {
+            console.error('❌ highlightSuspiciousMessage: element is null or undefined');
+            return;
         }
+
+        console.log('🔴 highlightSuspiciousMessage called with:', { 
+            riskScore, 
+            phrasesCount: suspiciousPhrases?.length || 0,
+            elementTag: element.tagName,
+            elementId: element.id || 'no-id',
+            elementClasses: element.className || 'no-classes'
+        });
+
+        let riskLevel = 'medium';
+        if (riskScore > 75) {
+            riskLevel = 'high';
+        }
+
+        // Store risk level on the element for sidebar indicator to use
+        element.dataset.spaiRiskLevel = riskLevel;
+        element.dataset.spaiRiskScore = riskScore;
+        element.dataset.spaiHighlighted = 'true'; // Mark as highlighted for verification
+
+        // Ensure highlight styles are injected
+        injectWhatsAppHighlightStyles();
+
+        // TARGET MESSAGE CONTENT: Find the actual message bubble, not the row/timestamp
+        const messageBubble = element.querySelector('.message-in, .message-out') || 
+                             element.querySelector('[data-pre-plain-text]')?.closest('div') ||
+                             element.querySelector('span.selectable-text')?.closest('div');
+        
+        const targetElement = messageBubble || element;
+        
+        console.log('🎯 Targeting element for highlight:', {
+            found: !!messageBubble,
+            targetTag: targetElement.tagName,
+            targetClasses: targetElement.className
+        });
+
+        // If we have specific suspicious phrases, highlight those specifically
+        if (suspiciousPhrases && suspiciousPhrases.length > 0) {
+            console.log('💡 Using phrase-specific highlighting for phrases:', suspiciousPhrases);
+            highlightSpecificPhrases(targetElement, suspiciousPhrases, riskLevel, riskScore);
+        } else {
+            // Fallback: highlight entire message with LIGHTER visual border
+            console.log('⚠️ No phrases provided, using full message highlighting');
+            
+            // LIGHTER colors as requested
+            const borderColor = riskLevel === 'high' ? 'rgba(234, 67, 53, 0.4)' : 'rgba(255, 193, 7, 0.4)';
+            const bgColor = riskLevel === 'high' ? 'rgba(234, 67, 53, 0.08)' : 'rgba(255, 235, 59, 0.08)';
+            
+            targetElement.style.outline = `2px solid ${borderColor}`;
+            targetElement.style.outlineOffset = '1px';
+            targetElement.style.backgroundColor = bgColor;
+            targetElement.style.borderRadius = '8px';
+            targetElement.title = `⚠️ spAI-Defender Warning: Risk score ${riskScore}/100 - Potential phishing/scam`;
+        }
+        
+        console.log('✅ Highlight applied successfully to element');
+    } catch (error) {
+        console.error('❌ Error in highlightSuspiciousMessage:', error.message, error.stack);
     }
 }
 
@@ -1568,14 +2059,14 @@ function highlightSpecificPhrases(element, phrases, riskLevel, riskScore) {
             containerDiv = element.querySelector('[data-pre-plain-text]')?.parentElement || element;
         }
 
-        // Define colors for risk levels
-        const bgColor = riskLevel === 'high' ? 'rgba(234, 67, 53, 0.25)' : 'rgba(255, 235, 59, 0.25)';
-        const borderColor = riskLevel === 'high' ? '#ea4335' : '#fbbc04';
+        // Define LIGHTER colors for risk levels as requested
+        const bgColor = riskLevel === 'high' ? 'rgba(234, 67, 53, 0.08)' : 'rgba(255, 235, 59, 0.08)';
+        const borderColor = riskLevel === 'high' ? 'rgba(234, 67, 53, 0.4)' : 'rgba(255, 193, 7, 0.4)';
         
         // Style the container div
         if (containerDiv && containerDiv !== document.body) {
             containerDiv.style.setProperty('background', bgColor, 'important');
-            containerDiv.style.setProperty('border-left', `4px solid ${borderColor}`, 'important');
+            containerDiv.style.setProperty('border-left', `3px solid ${borderColor}`, 'important');
             containerDiv.style.setProperty('border-radius', '7.5px', 'important');
             containerDiv.classList.add('spai-highlighted-message');
             containerDiv.classList.add(`spai-risk-${riskLevel}`);
@@ -1984,30 +2475,30 @@ function injectWhatsAppHighlightStyles() {
             border-radius: 4px;
         }
 
-        /* ===== Highlighted Message Container ===== */
+        /* ===== Highlighted Message Container (LIGHTER) ===== */
         .spai-highlighted-message {
             transition: all 0.3s ease;
         }
         .spai-highlighted-message.spai-risk-medium {
-            background-color: rgba(255, 235, 59, 0.25) !important;
-            border-left: 4px solid #fbbc04 !important;
+            background-color: rgba(255, 235, 59, 0.08) !important;
+            border-left: 3px solid rgba(255, 193, 7, 0.4) !important;
         }
         .spai-highlighted-message.spai-risk-high {
-            background-color: rgba(234, 67, 53, 0.25) !important;
-            border-left: 4px solid #ea4335 !important;
+            background-color: rgba(234, 67, 53, 0.08) !important;
+            border-left: 3px solid rgba(234, 67, 53, 0.4) !important;
         }
         
-        /* ===== Highlighted Text Spans (span[dir="auto"]) ===== */
+        /* ===== Highlighted Text Spans (LIGHTER) ===== */
         .spai-highlighted-text {
             transition: all 0.3s ease;
         }
         .spai-highlighted-text.spai-risk-medium {
-            background-color: rgba(255, 235, 59, 0.25) !important;
-            color: #856404 !important;
+            background-color: rgba(255, 235, 59, 0.12) !important;
+            color: inherit !important;
         }
         .spai-highlighted-text.spai-risk-high {
-            background-color: rgba(234, 67, 53, 0.25) !important;
-            color: #8b0000 !important;
+            background-color: rgba(234, 67, 53, 0.12) !important;
+            color: inherit !important;
         }
         
         /* ===== WhatsApp span[dir="auto"] specific styling ===== */

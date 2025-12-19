@@ -141,6 +141,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       handleExtractImageText(request.data, sendResponse);
       return true; // Async response
 
+    case 'WHATSAPP_CHAT_SNAPSHOT':
+      handleWhatsAppChatSnapshot(request.data, sender, sendResponse);
+      return true; // Async response
+
+    case 'GET_LAST_WHATSAPP_SNAPSHOT':
+      handleGetLastWhatsAppSnapshot(sendResponse);
+      return true; // Async response
+
     default:
       sendResponse({ error: 'Unknown message type' });
       return false;
@@ -431,24 +439,29 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
  * Handle phishing detection (includes image analysis)
  */
 async function handlePhishingDetection(data, sendResponse) {
+  console.log('🔵 handlePhishingDetection called with data:', data?.content?.substring(0, 50) || 'no content');
   try {
     // Extract content properly - data has {url, text, title, images}
     const url = data.url || '';
     const content = data.text || data.content || '';
     const title = data.title || '';
     const images = data.images || [];
-    
+
+    console.log('🔵 Content length:', content.length, 'chars');
+
     // Check cache first to reduce IDLE time
     const cacheKey = getCacheKey(content);
     const cachedResult = getCachedResult(cacheKey);
-    
+
     if (cachedResult) {
       console.log('📦 Using cached analysis result - reducing IDLE time');
       sendResponse(cachedResult);
       return;
     }
-    
+
+    console.log('🔵 Calling phishingDetector.detectPhishing...');
     const analysis = await phishingDetector.detectPhishing(url, content, title, images);
+    console.log('🔵 phishingDetector returned full analysis:', JSON.stringify(analysis, null, 2));
     
     // Show badge if high risk
     if (analysis.riskScore > 50) {
@@ -778,6 +791,72 @@ async function handleAnalyzeMessagesPhishing(data, sendResponse) {
     });
   } catch (error) {
     console.error('Error analyzing messages for phishing:', error);
+    sendResponse({
+      success: false,
+      error: error.message
+    });
+  }
+}
+
+/**
+ * Handle WhatsApp chat snapshot storage
+ */
+async function handleWhatsAppChatSnapshot(data, sender, sendResponse) {
+  try {
+    const tabId = sender?.tab?.id || null;
+    
+    if (!tabId) {
+      console.warn('WhatsApp snapshot received without tab ID');
+      sendResponse({ success: false, error: 'No tab ID' });
+      return;
+    }
+
+    const snapshot = {
+      tabId,
+      receivedAt: new Date().toISOString(),
+      trigger: data.trigger,
+      chatId: data.chatId,
+      chatName: data.chatName,
+      content: data.content
+    };
+
+    // Store in chrome.storage.local
+    await chrome.storage.local.set({
+      lastWhatsAppSnapshot: snapshot
+    });
+
+    console.log(`✅ WhatsApp snapshot stored (trigger: ${data.trigger}, chat: ${data.chatName})`);
+    
+    sendResponse({ success: true });
+  } catch (error) {
+    console.error('Error storing WhatsApp snapshot:', error);
+    sendResponse({
+      success: false,
+      error: error.message
+    });
+  }
+}
+
+/**
+ * Handle get last WhatsApp snapshot
+ */
+async function handleGetLastWhatsAppSnapshot(sendResponse) {
+  try {
+    const result = await chrome.storage.local.get('lastWhatsAppSnapshot');
+    
+    if (result.lastWhatsAppSnapshot) {
+      sendResponse({
+        success: true,
+        snapshot: result.lastWhatsAppSnapshot
+      });
+    } else {
+      sendResponse({
+        success: false,
+        error: 'No snapshot available'
+      });
+    }
+  } catch (error) {
+    console.error('Error retrieving WhatsApp snapshot:', error);
     sendResponse({
       success: false,
       error: error.message
