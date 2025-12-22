@@ -1537,6 +1537,7 @@ const GLOBAL_COOLDOWN = 500; // Minimum gap between any analyses
 const ANALYSIS_LOCK_TIMEOUT = 30000; // Force-release lock after 30 seconds if hung
 
 // Persist message risk across WhatsApp re-renders (WhatsApp often replaces nodes on selection changes)
+<<<<<<< HEAD
 // Keyed by BOTH data-id AND text hash so we can find cached risk even when WhatsApp swaps DOM nodes.
 const messageRiskCache = new Map(); // key (data-id OR textHash) -> { riskScore, riskLevel, suspiciousPhrases }
 
@@ -1561,6 +1562,10 @@ function getMessageTextHash(text) {
   }
   return 'txthash_' + (hash >>> 0).toString(36);
 }
+=======
+// Keyed by a stable-ish message id (data-id preferred), so we can re-apply highlights without re-analysis.
+const messageRiskCache = new Map(); // messageId -> { riskScore, riskLevel, suspiciousPhrases }
+>>>>>>> f4e6e47 (docs: sync documentation with code changes)
 
 function getMessageIdFromElement(el) {
   if (!el) return null;
@@ -1570,6 +1575,7 @@ function getMessageIdFromElement(el) {
   return nested || null;
 }
 
+<<<<<<< HEAD
 /**
  * Store risk data in cache under BOTH data-id and text hash keys (if available).
  */
@@ -1590,6 +1596,11 @@ function isElementHighlighted(el) {
   if (el.dataset?.spaiHighlighted === 'true') return true;
   // Check descendants for our class (WhatsApp may move nodes)
   if (el.querySelector?.('.spai-highlighted-message')) return true;
+=======
+function isElementHighlighted(el) {
+  if (!el) return false;
+  if (el.classList?.contains('spai-highlighted-message')) return true;
+>>>>>>> f4e6e47 (docs: sync documentation with code changes)
   // If WhatsApp overwrote classes, inline styles might still exist
   const b = el.style?.border || '';
   const o = el.style?.outline || '';
@@ -1597,6 +1608,7 @@ function isElementHighlighted(el) {
 }
 
 function getCachedRiskForMessage(message) {
+<<<<<<< HEAD
   // Try messageId (data-id) first
   const id = message?.messageId;
   if (id && messageRiskCache.has(id)) return messageRiskCache.get(id);
@@ -1605,6 +1617,10 @@ function getCachedRiskForMessage(message) {
   const textHash = message?.textHash;
   if (textHash && messageRiskCache.has(textHash)) return messageRiskCache.get(textHash);
 
+=======
+  const id = message?.messageId;
+  if (id && messageRiskCache.has(id)) return messageRiskCache.get(id);
+>>>>>>> f4e6e47 (docs: sync documentation with code changes)
   // Fallback: look for persisted dataset values on the element itself
   const el = message?.element;
   const riskScore = Number(el?.dataset?.spaiRiskScore || 0);
@@ -1622,6 +1638,7 @@ function getCachedRiskForMessage(message) {
 }
 
 function reapplyCachedHighlights(messages) {
+<<<<<<< HEAD
   const now = Date.now();
   if (spaiReapplyInProgress) return 0;
   if (now - spaiLastReapplyAt < SPAI_REAPPLY_MIN_INTERVAL_MS) return 0;
@@ -1650,6 +1667,26 @@ function reapplyCachedHighlights(messages) {
   } finally {
     spaiReapplyInProgress = false;
   }
+=======
+  let reapplied = 0;
+  messages.forEach((m) => {
+    const cached = getCachedRiskForMessage(m);
+    if (!cached) return;
+    if (cached.riskScore <= 30) return;
+
+    // If the bubble got re-rendered, our highlight styles/classes disappear. Reapply.
+    if (!isElementHighlighted(m.element)) {
+      try {
+        highlightSuspiciousMessage(m.element, cached.riskScore, cached.suspiciousPhrases || [], m.textElement);
+        reapplied++;
+      } catch (_) {}
+    }
+  });
+  if (reapplied > 0) {
+    console.log(`♻️ Reapplied ${reapplied} cached message highlight(s) after DOM change/selection.`);
+  }
+  return reapplied;
+>>>>>>> f4e6e47 (docs: sync documentation with code changes)
 }
 
 /**
@@ -1748,14 +1785,21 @@ function initializeWhatsAppObserver() {
     setupRealtimeMessageDetection(chatPanel);
 
     // Reapply cached highlights after user interactions (WhatsApp re-renders message nodes on click/selection)
+<<<<<<< HEAD
     // Throttled by reapplyCachedHighlights() guards.
+=======
+>>>>>>> f4e6e47 (docs: sync documentation with code changes)
     chatPanel.addEventListener('click', () => {
       setTimeout(() => {
         try {
           const msgs = extractFullWhatsAppConversation();
           reapplyCachedHighlights(msgs);
         } catch (_) {}
+<<<<<<< HEAD
       }, 250);
+=======
+      }, 150);
+>>>>>>> f4e6e47 (docs: sync documentation with code changes)
     }, true);
     return;
   }
@@ -2070,6 +2114,7 @@ async function analyzeAndHighlightMessages() {
 
                         // Persist risk data on element + in cache so highlight can survive WhatsApp re-renders
                         const messageId = message.messageId || getMessageIdFromElement(message.element);
+<<<<<<< HEAD
                         const textHash = message.textHash || getMessageTextHash(message.text);
                         message.messageId = messageId;
                         message.textHash = textHash;
@@ -2086,6 +2131,21 @@ async function analyzeAndHighlightMessages() {
                           suspiciousPhrases: (response.analysis.suspiciousPhrases || []).slice(0, 12)
                         };
                         cacheMessageRisk(messageId, textHash, riskData);
+=======
+                        message.messageId = messageId;
+                        message.element.dataset.spaiRiskScore = String(riskScore);
+                        message.element.dataset.spaiRiskLevel = msgRiskLevel;
+                        try {
+                          message.element.dataset.spaiSuspiciousPhrases = JSON.stringify((response.analysis.suspiciousPhrases || []).slice(0, 12));
+                        } catch (_) {}
+                        if (messageId) {
+                          messageRiskCache.set(messageId, {
+                            riskScore,
+                            riskLevel: msgRiskLevel,
+                            suspiciousPhrases: (response.analysis.suspiciousPhrases || []).slice(0, 12)
+                          });
+                        }
+>>>>>>> f4e6e47 (docs: sync documentation with code changes)
                         
                         // RETRY-SAFE: Only mark as analyzed after successful response
                         message.element.dataset.spaiAnalyzed = 'true';
@@ -2725,11 +2785,17 @@ function extractFullWhatsAppConversation() {
             }
 
             const messageId = getMessageIdFromElement(el);
+<<<<<<< HEAD
             const textHash = getMessageTextHash(text); // Stable hash for cache lookup
             messages.push({
                 element: el,
                 messageId, // Stable-ish id used for cached highlight reapplication
                 textHash,  // Text hash as fallback when data-id changes
+=======
+            messages.push({
+                element: el,
+                messageId, // Stable-ish id used for cached highlight reapplication
+>>>>>>> f4e6e47 (docs: sync documentation with code changes)
                 textElement: textEl, // Store reference to actual text element for reliable highlighting
                 text,
                 sender: direction === 'out' ? 'You' : 'Contact',

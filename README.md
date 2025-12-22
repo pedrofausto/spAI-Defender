@@ -42,6 +42,7 @@ A robust browser extension that reads and analyzes content from web pages using 
 - ✅ Silent protection for low risk
 - ✅ Visual guidance for medium risk
 - ✅ Critical warnings for high risk
+- ✅ Offscreen document AI processing (improved stability)
 
 **Learn More:** See [chrome-extension/README.md](chrome-extension/README.md) for detailed documentation.
 
@@ -76,11 +77,16 @@ spAI-Defender/
 │   ├── src/
 │   │   ├── background/     # Service worker
 │   │   ├── content/        # Content scripts
+│   │   ├── offscreen/      # Offscreen document for AI processing
 │   │   ├── popup/          # UI components
 │   │   └── utils/          # Utilities and AI manager
 │   ├── assets/             # Icons and resources
 │   ├── docs/               # Documentation
 │   └── README.md           # Extension documentation
+├── tests/                   # Jest test suites
+│   ├── unit/               # Unit tests for utility modules
+│   └── helpers/            # Test mocks and utilities
+├── .moai/                   # MoAI-ADK configuration
 ├── README.md               # This file
 └── LICENSE                 # MIT License
 ```
@@ -110,7 +116,9 @@ spAI-Defender/
 - **Chrome Built-in AI (Gemini Nano)**: On-device AI model
 - **Manifest V3**: Latest Chrome extension standard
 - **JavaScript ES6+**: Modern JavaScript features
-- **Chrome Extension APIs**: tabs, scripting, storage
+- **Chrome Extension APIs**: tabs, scripting, storage, offscreen
+- **Jest**: Testing framework with Chrome API mocks
+- **MoAI-ADK**: Development workflow orchestration
 
 ## Privacy & Security
 

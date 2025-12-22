@@ -3,7 +3,7 @@
  * Handles Chrome Built-in AI operations and tab communication
  */
 
-import { AISessionManager } from '../utils/ai-session-manager.js';
+import { AIOffscreenProxy } from '../utils/ai-offscreen-proxy.js';
 import { PhishingDetector } from '../utils/phishing-detector.js';
 import { SentimentAnalyzer } from '../utils/sentiment-analyzer.js';
 import { PlatformDetector } from '../utils/platform-detector.js';
@@ -11,7 +11,7 @@ import { ImageAnalyzer } from '../utils/image-analyzer.js';
 import { WhatsAppReader } from '../utils/whatsapp-reader.js';
 import { TelegramReader } from '../utils/telegram-reader.js';
 
-const aiManager = new AISessionManager();
+const aiManager = new AIOffscreenProxy();
 const phishingDetector = new PhishingDetector(aiManager);
 const sentimentAnalyzer = new SentimentAnalyzer(aiManager);
 const platformDetector = new PlatformDetector();
