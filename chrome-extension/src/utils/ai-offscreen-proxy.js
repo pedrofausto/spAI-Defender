@@ -10,6 +10,32 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+function pickOutputLanguage() {
+  const lang = (typeof navigator !== 'undefined' && navigator.language ? navigator.language : 'en').toLowerCase();
+  if (lang.startsWith('es')) return 'es';
+  if (lang.startsWith('ja')) return 'ja';
+  return 'en';
+}
+
+function normalizeSessionOptions(inputOptions = {}) {
+  const options = { ...(inputOptions || {}) };
+
+  // Chrome Built-in AI requires either both topK and temperature, or neither.
+  const hasTemp = Object.prototype.hasOwnProperty.call(options, 'temperature');
+  const hasTopK = Object.prototype.hasOwnProperty.call(options, 'topK');
+  if (hasTemp || hasTopK) {
+    if (!hasTemp) options.temperature = 0.8;
+    if (!hasTopK) options.topK = 40;
+  }
+
+  // Some Chrome builds require an explicit output language for safety attestation.
+  if (!Object.prototype.hasOwnProperty.call(options, 'outputLanguage')) {
+    options.outputLanguage = pickOutputLanguage(); // must be one of: en, es, ja
+  }
+
+  return options;
+}
+
 export class AIOffscreenProxy {
   constructor() {
     this.availability = null;
@@ -17,6 +43,33 @@ export class AIOffscreenProxy {
     this.aiAvailable = false;
     this._currentSessionId = null;
     this._creatingOffscreen = null;
+    this._sessionOptions = new Map(); // sessionId -> normalized options (at least outputLanguage)
+  }
+
+  _envInfo() {
+    return {
+      context: 'service_worker',
+      userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown',
+      hasOffscreenApi: typeof chrome !== 'undefined' && !!chrome.offscreen,
+      hasOffscreenCreate:
+        typeof chrome !== 'undefined' && !!chrome.offscreen && typeof chrome.offscreen.createDocument === 'function',
+      hasOffscreenHasDocument:
+        typeof chrome !== 'undefined' && !!chrome.offscreen && typeof chrome.offscreen.hasDocument === 'function'
+    };
+  }
+
+  async _waitForOffscreenReady() {
+    // Offscreen createDocument can return before scripts are fully ready to receive messages.
+    const maxAttempts = 10;
+    for (let i = 0; i < maxAttempts; i++) {
+      try {
+        await chrome.runtime.sendMessage({ type: REQ_TYPE, action: 'ping', payload: {} });
+        return true;
+      } catch (_) {
+        await sleep(50 + i * 25);
+      }
+    }
+    return false;
   }
 
   async _ensureOffscreenDocument() {
@@ -26,14 +79,29 @@ export class AIOffscreenProxy {
       // Some Chrome versions need a small delay after SW wake-up
       await sleep(0);
 
+      const env = this._envInfo();
+      if (!env.hasOffscreenApi || !env.hasOffscreenCreate || !env.hasOffscreenHasDocument) {
+        throw new Error('OFFSCREEN_UNAVAILABLE: chrome.offscreen API is not available in this context');
+      }
+
       const has = await chrome.offscreen.hasDocument();
       if (has) return true;
 
-      await chrome.offscreen.createDocument({
-        url: OFFSCREEN_URL,
-        reasons: ['DOM_SCRAPING'],
-        justification: 'Run Chrome Built-in AI (LanguageModel/Summarizer) in an offscreen document context.'
-      });
+      console.log('[spai][ai-proxy] creating offscreen document…', { url: OFFSCREEN_URL });
+      try {
+        await chrome.offscreen.createDocument({
+          url: OFFSCREEN_URL,
+          reasons: ['DOM_SCRAPING'],
+          justification: 'Run Chrome Built-in AI (LanguageModel/Summarizer) in an offscreen document context.'
+        });
+        const ready = await this._waitForOffscreenReady();
+        if (!ready) {
+          console.warn('[spai][ai-proxy] offscreen ping not ready yet (continuing)');
+        }
+      } catch (e) {
+        console.error('[spai][ai-proxy] offscreen creation failed', e);
+        throw new Error(`OFFSCREEN_CREATE_FAILED: ${e?.message || String(e)}`);
+      }
       return true;
     })();
 
@@ -56,7 +124,14 @@ export class AIOffscreenProxy {
 
     const res = await Promise.race([sendPromise, timeoutPromise]);
     if (!res || res.ok !== true) {
-      throw new Error(res?.error || `Offscreen request failed: ${action}`);
+      const errStr =
+        typeof res?.error === 'string'
+          ? res.error
+          : res?.error
+            ? JSON.stringify(res.error)
+            : null;
+      console.error('[spai][ai-proxy] offscreen request failed', { action, response: res });
+      throw new Error(errStr || `Offscreen request failed: ${action}`);
     }
     return res.result;
   }
@@ -69,13 +144,17 @@ export class AIOffscreenProxy {
     if (this.availabilityChecked && this.availability) return this.availability;
 
     try {
+      const env = this._envInfo();
+      console.log('[spai][ai-proxy] checkAvailability()', env);
       const caps = await this._send('capabilities', {}, 4000);
       const available = caps?.available || 'no';
       this.availability = available;
       this.aiAvailable = available === 'readily' || available === 'after-download';
       this.availabilityChecked = true;
+      console.log('[spai][ai-proxy] availability:', this.availability);
       return this.availability;
     } catch (e) {
+      console.warn('[spai][ai-proxy] availability check failed:', e?.message || e);
       this.availability = 'no';
       this.aiAvailable = false;
       this.availabilityChecked = true;
@@ -110,6 +189,20 @@ export class AIOffscreenProxy {
     };
   }
 
+  async hasSummarizationAPI() {
+    try {
+      const res = await this._send('summarizerAvailable', {}, 4000);
+      return !!res?.available;
+    } catch (e) {
+      console.warn('[spai][ai-proxy] summarizerAvailable check failed:', e?.message || e);
+      return false;
+    }
+  }
+
+  async getOffscreenDiagnostics() {
+    return await this._send('diagnostics', {}, 5000);
+  }
+
   /**
    * Returns a session proxy object with .prompt(), matching existing callers.
    */
@@ -121,15 +214,18 @@ export class AIOffscreenProxy {
       throw error;
     }
 
-    const { sessionId } = await this._send('createSession', { options }, 8000);
+    const normalized = normalizeSessionOptions(options);
+    const { sessionId } = await this._send('createSession', { options: normalized }, 8000);
     this._currentSessionId = sessionId;
+    this._sessionOptions.set(sessionId, normalized);
 
     // Session proxy for compatibility with existing code (session.prompt(...))
     return {
       __spaiSessionProxy: true,
       sessionId,
       prompt: async (promptText) => {
-        const res = await this._send('prompt', { sessionId, prompt: promptText }, 20000);
+        const opts = this._sessionOptions.get(sessionId) || normalized;
+        const res = await this._send('prompt', { sessionId, prompt: promptText, options: { outputLanguage: opts.outputLanguage } }, 60000);
         return res.text;
       },
       destroy: async () => {
@@ -141,11 +237,15 @@ export class AIOffscreenProxy {
   async getOrCreateSession(options = {}) {
     if (this._currentSessionId) {
       const sessionId = this._currentSessionId;
+      const normalized = normalizeSessionOptions(options);
+      // update stored options (keep latest outputLanguage)
+      this._sessionOptions.set(sessionId, { ...(this._sessionOptions.get(sessionId) || {}), ...normalized });
       return {
         __spaiSessionProxy: true,
         sessionId,
         prompt: async (promptText) => {
-          const res = await this._send('prompt', { sessionId, prompt: promptText, options }, 20000);
+          const opts = this._sessionOptions.get(sessionId) || normalized;
+          const res = await this._send('prompt', { sessionId, prompt: promptText, options: { outputLanguage: opts.outputLanguage } }, 60000);
           return res.text;
         },
         destroy: async () => {
@@ -161,6 +261,7 @@ export class AIOffscreenProxy {
     if (!sessionId) return;
     await this._send('destroySession', { sessionId }, 8000);
     if (sessionId === this._currentSessionId) this._currentSessionId = null;
+    this._sessionOptions.delete(sessionId);
   }
 
   async reset() {
@@ -176,6 +277,22 @@ export class AIOffscreenProxy {
   async summarize(text, options = {}) {
     const { summary } = await this._send('summarize', { text, options }, 20000);
     return summary;
+  }
+
+  /**
+   * Compatibility with AISessionManager pooling API.
+   * Offscreen sessions are lightweight proxies; pooling is handled internally by the offscreen map.
+   */
+  getPooledSession() {
+    return null;
+  }
+
+  returnSessionToPool(_session) {
+    // no-op
+  }
+
+  async cloneSession() {
+    throw new Error('cloneSession is not supported by AIOffscreenProxy');
   }
 }
 

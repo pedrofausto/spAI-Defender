@@ -10,6 +10,7 @@ import { PlatformDetector } from '../utils/platform-detector.js';
 import { ImageAnalyzer } from '../utils/image-analyzer.js';
 import { WhatsAppReader } from '../utils/whatsapp-reader.js';
 import { TelegramReader } from '../utils/telegram-reader.js';
+import { collectAIDiagnostics } from '../utils/ai-diagnostics.js';
 
 const aiManager = new AIOffscreenProxy();
 const phishingDetector = new PhishingDetector(aiManager);
@@ -79,6 +80,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   switch (request.type) {
     case 'CHECK_AI_AVAILABILITY':
       handleCheckAvailability(sendResponse);
+      return true; // Async response
+
+    case 'RUN_AI_DIAGNOSTICS':
+      handleRunAIDiagnostics(sendResponse);
       return true; // Async response
 
     case 'ANALYZE_TAB_CONTENT':
@@ -156,22 +161,54 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
 
 /**
- * Check AI model availability - Simplified to always return ready
+ * Check AI model availability (real check via offscreen proxy)
  */
 async function handleCheckAvailability(sendResponse) {
-  sendResponse({
-    success: true,
-    availability: 'readily',
-    capabilities: {
-      available: true,
-      availability: 'readily',
+  try {
+    const availability = await aiManager.checkAvailability();
+    const capabilities = await aiManager.getCapabilities().catch((e) => ({
+      available: false,
+      availability: 'no',
       defaultTemperature: 0.8,
       defaultTopK: 40,
-      maxTopK: 40
-    },
-    summarizationCapabilities: true,
-    hasSummarizationAPI: true
-  });
+      maxTopK: 40,
+      error: e?.message || String(e)
+    }));
+
+    const hasSummarizationAPI =
+      typeof aiManager.hasSummarizationAPI === 'function'
+        ? await aiManager.hasSummarizationAPI()
+        : false;
+
+    sendResponse({
+      success: true,
+      availability,
+      capabilities,
+      summarizationCapabilities: true,
+      hasSummarizationAPI
+    });
+  } catch (error) {
+    console.error('Error checking AI availability:', error);
+    sendResponse({
+      success: false,
+      availability: 'no',
+      error: error?.message || String(error),
+      hasSummarizationAPI: false
+    });
+  }
+}
+
+/**
+ * Return detailed diagnostics report for debugging AI availability.
+ */
+async function handleRunAIDiagnostics(sendResponse) {
+  try {
+    const report = await collectAIDiagnostics(aiManager);
+    sendResponse({ success: true, report });
+  } catch (error) {
+    console.error('Error running AI diagnostics:', error);
+    sendResponse({ success: false, error: error?.message || String(error) });
+  }
 }
 
 /**
@@ -467,14 +504,19 @@ async function handlePhishingDetection(data, sendResponse) {
     if (analysis.riskScore > 50) {
       const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
       if (tabs[0]) {
-        chrome.tabs.sendMessage(tabs[0].id, {
-          type: 'SHOW_SECURITY_BADGE',
-          data: {
-            riskLevel: analysis.riskLevel,
-            riskScore: analysis.riskScore,
-            indicators: analysis.redFlags
-          }
-        });
+        try {
+          await chrome.tabs.sendMessage(tabs[0].id, {
+            type: 'SHOW_SECURITY_BADGE',
+            data: {
+              riskLevel: analysis.riskLevel,
+              riskScore: analysis.riskScore,
+              indicators: analysis.redFlags
+            }
+          });
+        } catch (e) {
+          // Content script may not be injected on this page; ignore.
+          console.warn('SHOW_SECURITY_BADGE sendMessage failed:', e?.message || e);
+        }
       }
     }
 

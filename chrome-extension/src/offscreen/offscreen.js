@@ -13,6 +13,30 @@ function nextSessionId() {
   return `lm_${Date.now()}_${sessionSeq}`;
 }
 
+function pickOutputLanguage() {
+  const lang = (typeof navigator !== 'undefined' && navigator.language ? navigator.language : 'en').toLowerCase();
+  if (lang.startsWith('es')) return 'es';
+  if (lang.startsWith('ja')) return 'ja';
+  return 'en';
+}
+
+function normalizeSessionOptions(inputOptions = {}) {
+  const options = { ...(inputOptions || {}) };
+
+  const hasTemp = Object.prototype.hasOwnProperty.call(options, 'temperature');
+  const hasTopK = Object.prototype.hasOwnProperty.call(options, 'topK');
+  if (hasTemp || hasTopK) {
+    if (!hasTemp) options.temperature = 0.8;
+    if (!hasTopK) options.topK = 40;
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(options, 'outputLanguage')) {
+    options.outputLanguage = pickOutputLanguage(); // supported: en, es, ja
+  }
+
+  return options;
+}
+
 async function getLanguageModelCapabilities() {
   if (typeof self === 'undefined' || !self.LanguageModel) {
     return { available: 'no' };
@@ -28,12 +52,25 @@ async function getLanguageModelCapabilities() {
   return { available: 'no' };
 }
 
+function getSummarizerAvailability() {
+  return typeof self !== 'undefined' && typeof self.Summarizer !== 'undefined';
+}
+
 async function ensureSession(sessionId, options = {}) {
   if (sessionId && sessions.has(sessionId)) return sessions.get(sessionId);
   if (typeof self === 'undefined' || !self.LanguageModel) {
     throw new Error('AI_UNAVAILABLE: Chrome Built-in AI is not available');
   }
-  const session = await self.LanguageModel.create(options);
+  const normalized = normalizeSessionOptions(options);
+  let session;
+  try {
+    session = await self.LanguageModel.create(normalized);
+  } catch (e) {
+    const name = e?.name || 'Error';
+    const msg = e?.message || String(e);
+    console.error('[spai][offscreen] LanguageModel.create failed', { name, msg, normalized });
+    throw new Error(`AI_SESSION_FAILED: ${name}: ${msg}`);
+  }
   const id = sessionId || nextSessionId();
   sessions.set(id, session);
   return { session, sessionId: id };
@@ -81,9 +118,48 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     const { action, payload } = request;
 
     switch (action) {
+      case 'ping': {
+        return {
+          ok: true,
+          result: {
+            ready: true,
+            context: 'offscreen',
+            languageModelPresent: typeof self !== 'undefined' && !!self.LanguageModel,
+            summarizerPresent: getSummarizerAvailability()
+          }
+        };
+      }
+
       case 'capabilities': {
         const caps = await getLanguageModelCapabilities();
         return { ok: true, result: caps };
+      }
+
+      case 'summarizerAvailable': {
+        return { ok: true, result: { available: getSummarizerAvailability() } };
+      }
+
+      case 'diagnostics': {
+        const languageModelPresent = typeof self !== 'undefined' && !!self.LanguageModel;
+        const summarizerPresent = getSummarizerAvailability();
+        let caps = null;
+        let capsError = null;
+        try {
+          caps = await getLanguageModelCapabilities();
+        } catch (e) {
+          capsError = e?.message || String(e);
+        }
+        return {
+          ok: true,
+          result: {
+            context: 'offscreen',
+            userAgent: navigator.userAgent,
+            languageModelPresent,
+            summarizerPresent,
+            capabilities: caps,
+            capabilitiesError: capsError
+          }
+        };
       }
 
       case 'createSession': {
@@ -108,7 +184,29 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
         const ensured = await ensureSession(sessionId, options || {});
         const session = ensured.session || ensured;
         const actualSessionId = ensured.sessionId || sessionId;
-        const text = await session.prompt(prompt);
+        const outLang =
+          (options && typeof options === 'object' && options.outputLanguage) ? options.outputLanguage : pickOutputLanguage();
+
+        let text;
+        try {
+          // Some Chrome builds require outputLanguage on requests (not only on create()).
+          text = await session.prompt(prompt, { outputLanguage: outLang });
+        } catch (e1) {
+          try {
+            // Alternate key name in some builds
+            text = await session.prompt(prompt, { language: outLang });
+          } catch (e2) {
+            try {
+              // Backward/alternate API signature fallback
+              text = await session.prompt(prompt);
+            } catch (e3) {
+              const name = e3?.name || e2?.name || e1?.name || 'Error';
+              const msg = e3?.message || e2?.message || e1?.message || String(e3 || e2 || e1);
+              console.error('[spai][offscreen] prompt failed', { name, msg, outLang });
+              throw new Error(`AI_PROMPT_FAILED: ${name}: ${msg}`);
+            }
+          }
+        }
         return { ok: true, result: { sessionId: actualSessionId, text } };
       }
 
@@ -124,13 +222,17 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   })()
     .then((res) => sendResponse(res))
     .catch((err) => {
+      console.error('[spai][offscreen] request failed:', request?.action, err);
       sendResponse({ ok: false, error: err?.message || String(err) });
     });
 
   return true; // async
 });
 
-console.log('spAI-Defender: offscreen AI runtime ready');
+console.log('[spai][offscreen] AI runtime ready', {
+  languageModelPresent: typeof self !== 'undefined' && !!self.LanguageModel,
+  summarizerPresent: getSummarizerAvailability()
+});
 
 
 
