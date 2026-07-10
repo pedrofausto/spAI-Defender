@@ -13,12 +13,63 @@ class SecurityBadge {
     this.currentRiskLevel = 'UNKNOWN';
   }
 
+  normalizeRiskLevel(riskLevel) {
+    const level = String(riskLevel || 'UNKNOWN').toUpperCase();
+    return ['LOW', 'MEDIUM', 'MEDIUM_HIGH', 'HIGH', 'CRITICAL', 'UNKNOWN'].includes(level) ? level : 'UNKNOWN';
+  }
+
+  normalizeRiskScore(riskScore) {
+    const score = Number(riskScore);
+    if (!Number.isFinite(score)) return 0;
+    return Math.max(0, Math.min(100, Math.round(score)));
+  }
+
+  createElement(tagName, className, text = null) {
+    const element = document.createElement(tagName);
+    if (className) element.className = className;
+    if (text !== null) element.textContent = String(text);
+    return element;
+  }
+
+  buildRiskIndicator(riskLevel, riskScore, translations = null) {
+    const label = translations ? `${translations.risk}: ${translations.levels[riskLevel] || riskLevel}` : `Risk: ${riskLevel}`;
+    const container = this.createElement('div', 'spai-risk-indicator');
+    const level = this.createElement('div', 'spai-risk-level', label);
+    const score = this.createElement('div', 'spai-risk-score', `${riskScore}/100`);
+    const bar = this.createElement('div', 'spai-risk-bar');
+    const fill = this.createElement('div', 'spai-risk-fill');
+    fill.style.width = `${riskScore}%`;
+    bar.appendChild(fill);
+    container.append(level, score, bar);
+    return container;
+  }
+
+  buildIndicators(indicators) {
+    const safeIndicators = Array.isArray(indicators) ? indicators.slice(0, 3) : [];
+    if (safeIndicators.length === 0) return null;
+
+    const container = this.createElement('div', 'spai-indicators');
+    for (const indicator of safeIndicators) {
+      container.appendChild(this.createElement('span', 'spai-indicator', indicator));
+    }
+    return container;
+  }
+
+  buildBody(riskLevel, riskScore, indicators, translations = null) {
+    const body = this.createElement('div', 'spai-badge-body');
+    body.appendChild(this.buildRiskIndicator(riskLevel, riskScore, translations));
+    const indicatorList = this.buildIndicators(indicators);
+    if (indicatorList) body.appendChild(indicatorList);
+    return body;
+  }
   create(riskLevel, riskScore, indicators = []) {
     if (this.badge) {
       this.remove();
     }
 
-    this.currentRiskLevel = riskLevel;
+    const safeRiskLevel = this.normalizeRiskLevel(riskLevel);
+    const safeRiskScore = this.normalizeRiskScore(riskScore);
+    this.currentRiskLevel = safeRiskLevel;
 
     // Get browser language for translations
     const lang = navigator.language.toLowerCase();
@@ -26,48 +77,27 @@ class SecurityBadge {
 
     const badge = document.createElement('div');
     badge.id = 'spai-security-badge';
-    badge.className = `spai-badge spai-risk-${riskLevel.toLowerCase()}`;
+    badge.className = `spai-badge spai-risk-${safeRiskLevel.toLowerCase()}`;
 
-    // CSP-SAFE: No inline onclick handlers - attach listeners programmatically
-    // Removed "View Details" button as requested
-    badge.innerHTML = `
-      <div class="spai-badge-header">
-        <span class="spai-badge-icon">🛡️</span>
-        <span class="spai-badge-title">${translations.title}</span>
-        <button class="spai-badge-close">×</button>
-      </div>
-      <div class="spai-badge-body">
-        <div class="spai-risk-indicator">
-          <div class="spai-risk-level">${translations.risk}: ${translations.levels[riskLevel] || riskLevel}</div>
-          <div class="spai-risk-score">${riskScore}/100</div>
-          <div class="spai-risk-bar">
-            <div class="spai-risk-fill" style="width: ${riskScore}%"></div>
-          </div>
-        </div>
-        ${indicators.length > 0 ? `
-          <div class="spai-indicators">
-            ${indicators.slice(0, 3).map(ind => `<span class="spai-indicator">${ind}</span>`).join('')}
-          </div>
-        ` : ''}
-      </div>
-    `;
+    const header = this.createElement('div', 'spai-badge-header');
+    header.append(
+      this.createElement('span', 'spai-badge-icon', '🛡️'),
+      this.createElement('span', 'spai-badge-title', translations.title)
+    );
+    const closeBtn = this.createElement('button', 'spai-badge-close', '×');
+    closeBtn.addEventListener('click', () => {
+      console.log('🗙 Badge close button clicked');
+      this.remove();
+    });
+    header.appendChild(closeBtn);
+
+    badge.append(header, this.buildBody(safeRiskLevel, safeRiskScore, indicators, translations));
 
     document.body.appendChild(badge);
     this.badge = badge;
     this.isVisible = true;
 
-    // CSP-SAFE: Attach click handlers programmatically (works under WhatsApp CSP)
-    const closeBtn = badge.querySelector('.spai-badge-close');
-    if (closeBtn) {
-      closeBtn.addEventListener('click', () => {
-        console.log('🗙 Badge close button clicked');
-        this.remove();
-      });
-    } else {
-      console.warn('⚠️ SecurityBadge: close button not found in DOM');
-    }
-
-    if (riskLevel === 'LOW' && riskScore < 30) {
+    if (safeRiskLevel === 'LOW' && safeRiskScore < 30) {
       setTimeout(() => this.remove(), 10000);
     }
 
@@ -158,27 +188,18 @@ class SecurityBadge {
       return;
     }
 
-    this.currentRiskLevel = riskLevel;
+    const safeRiskLevel = this.normalizeRiskLevel(riskLevel);
+    const safeRiskScore = this.normalizeRiskScore(riskScore);
+    this.currentRiskLevel = safeRiskLevel;
+    this.badge.className = `spai-badge spai-risk-${safeRiskLevel.toLowerCase()}`;
+
+    const lang = navigator.language.toLowerCase();
+    const translations = this.getTranslations(lang);
     const body = this.badge.querySelector('.spai-badge-body');
 
     if (body) {
-      body.innerHTML = `
-        <div class="spai-risk-indicator">
-          <div class="spai-risk-level">Risk: ${riskLevel}</div>
-          <div class="spai-risk-score">${riskScore}/100</div>
-          <div class="spai-risk-bar">
-            <div class="spai-risk-fill" style="width: ${riskScore}%"></div>
-          </div>
-        </div>
-        ${indicators.length > 0 ? `
-          <div class="spai-indicators">
-            ${indicators.slice(0, 3).map(ind => `<span class="spai-indicator">${ind}</span>`).join('')}
-          </div>
-        ` : ''}
-        <div class="spai-badge-footer">
-          <button class="spai-action-btn">View Details</button>
-        </div>
-      `;
+      const newBody = this.buildBody(safeRiskLevel, safeRiskScore, indicators, translations);
+      body.replaceChildren(...newBody.childNodes);
     }
   }
 
@@ -1315,7 +1336,7 @@ function addImageOverlays() {
       
       const btn = document.createElement('button');
       btn.className = 'spai-image-analysis-btn';
-      btn.innerHTML = '🔍';
+      btn.textContent = '🔍';
       btn.title = 'Analyze image for phishing';
       btn.setAttribute('aria-label', 'Analyze image');
       
@@ -1413,7 +1434,7 @@ function addOverlayToImage(img) {
     
     const btn = document.createElement('button');
     btn.className = 'spai-image-analysis-btn';
-    btn.innerHTML = '🔍';
+    btn.textContent = '🔍';
     btn.title = 'Analyze image for phishing';
     btn.setAttribute('aria-label', 'Analyze image');
     
@@ -1451,7 +1472,7 @@ async function analyzeImage(img, btn, tooltip) {
   try {
     // Update button state
     btn.classList.add('analyzing');
-    btn.innerHTML = '⏳';
+    btn.textContent = '⏳';
     btn.disabled = true;
 
     // Show tooltip
@@ -1513,7 +1534,7 @@ async function analyzeImage(img, btn, tooltip) {
   } finally {
     // Reset button
     btn.classList.remove('analyzing');
-    btn.innerHTML = '🔍';
+    btn.textContent = '🔍';
     btn.disabled = false;
 
     // Auto-hide tooltip after 3 seconds
@@ -1537,7 +1558,6 @@ const GLOBAL_COOLDOWN = 500; // Minimum gap between any analyses
 const ANALYSIS_LOCK_TIMEOUT = 30000; // Force-release lock after 30 seconds if hung
 
 // Persist message risk across WhatsApp re-renders (WhatsApp often replaces nodes on selection changes)
-<<<<<<< HEAD
 // Keyed by BOTH data-id AND text hash so we can find cached risk even when WhatsApp swaps DOM nodes.
 const messageRiskCache = new Map(); // key (data-id OR textHash) -> { riskScore, riskLevel, suspiciousPhrases }
 
@@ -1562,10 +1582,6 @@ function getMessageTextHash(text) {
   }
   return 'txthash_' + (hash >>> 0).toString(36);
 }
-=======
-// Keyed by a stable-ish message id (data-id preferred), so we can re-apply highlights without re-analysis.
-const messageRiskCache = new Map(); // messageId -> { riskScore, riskLevel, suspiciousPhrases }
->>>>>>> f4e6e47 (docs: sync documentation with code changes)
 
 function getMessageIdFromElement(el) {
   if (!el) return null;
@@ -1575,7 +1591,6 @@ function getMessageIdFromElement(el) {
   return nested || null;
 }
 
-<<<<<<< HEAD
 /**
  * Store risk data in cache under BOTH data-id and text hash keys (if available).
  */
@@ -1596,11 +1611,6 @@ function isElementHighlighted(el) {
   if (el.dataset?.spaiHighlighted === 'true') return true;
   // Check descendants for our class (WhatsApp may move nodes)
   if (el.querySelector?.('.spai-highlighted-message')) return true;
-=======
-function isElementHighlighted(el) {
-  if (!el) return false;
-  if (el.classList?.contains('spai-highlighted-message')) return true;
->>>>>>> f4e6e47 (docs: sync documentation with code changes)
   // If WhatsApp overwrote classes, inline styles might still exist
   const b = el.style?.border || '';
   const o = el.style?.outline || '';
@@ -1608,7 +1618,6 @@ function isElementHighlighted(el) {
 }
 
 function getCachedRiskForMessage(message) {
-<<<<<<< HEAD
   // Try messageId (data-id) first
   const id = message?.messageId;
   if (id && messageRiskCache.has(id)) return messageRiskCache.get(id);
@@ -1617,10 +1626,6 @@ function getCachedRiskForMessage(message) {
   const textHash = message?.textHash;
   if (textHash && messageRiskCache.has(textHash)) return messageRiskCache.get(textHash);
 
-=======
-  const id = message?.messageId;
-  if (id && messageRiskCache.has(id)) return messageRiskCache.get(id);
->>>>>>> f4e6e47 (docs: sync documentation with code changes)
   // Fallback: look for persisted dataset values on the element itself
   const el = message?.element;
   const riskScore = Number(el?.dataset?.spaiRiskScore || 0);
@@ -1638,7 +1643,6 @@ function getCachedRiskForMessage(message) {
 }
 
 function reapplyCachedHighlights(messages) {
-<<<<<<< HEAD
   const now = Date.now();
   if (spaiReapplyInProgress) return 0;
   if (now - spaiLastReapplyAt < SPAI_REAPPLY_MIN_INTERVAL_MS) return 0;
@@ -1667,26 +1671,6 @@ function reapplyCachedHighlights(messages) {
   } finally {
     spaiReapplyInProgress = false;
   }
-=======
-  let reapplied = 0;
-  messages.forEach((m) => {
-    const cached = getCachedRiskForMessage(m);
-    if (!cached) return;
-    if (cached.riskScore <= 30) return;
-
-    // If the bubble got re-rendered, our highlight styles/classes disappear. Reapply.
-    if (!isElementHighlighted(m.element)) {
-      try {
-        highlightSuspiciousMessage(m.element, cached.riskScore, cached.suspiciousPhrases || [], m.textElement);
-        reapplied++;
-      } catch (_) {}
-    }
-  });
-  if (reapplied > 0) {
-    console.log(`♻️ Reapplied ${reapplied} cached message highlight(s) after DOM change/selection.`);
-  }
-  return reapplied;
->>>>>>> f4e6e47 (docs: sync documentation with code changes)
 }
 
 /**
@@ -1785,21 +1769,14 @@ function initializeWhatsAppObserver() {
     setupRealtimeMessageDetection(chatPanel);
 
     // Reapply cached highlights after user interactions (WhatsApp re-renders message nodes on click/selection)
-<<<<<<< HEAD
     // Throttled by reapplyCachedHighlights() guards.
-=======
->>>>>>> f4e6e47 (docs: sync documentation with code changes)
     chatPanel.addEventListener('click', () => {
       setTimeout(() => {
         try {
           const msgs = extractFullWhatsAppConversation();
           reapplyCachedHighlights(msgs);
         } catch (_) {}
-<<<<<<< HEAD
       }, 250);
-=======
-      }, 150);
->>>>>>> f4e6e47 (docs: sync documentation with code changes)
     }, true);
     return;
   }
@@ -2114,7 +2091,6 @@ async function analyzeAndHighlightMessages() {
 
                         // Persist risk data on element + in cache so highlight can survive WhatsApp re-renders
                         const messageId = message.messageId || getMessageIdFromElement(message.element);
-<<<<<<< HEAD
                         const textHash = message.textHash || getMessageTextHash(message.text);
                         message.messageId = messageId;
                         message.textHash = textHash;
@@ -2131,21 +2107,6 @@ async function analyzeAndHighlightMessages() {
                           suspiciousPhrases: (response.analysis.suspiciousPhrases || []).slice(0, 12)
                         };
                         cacheMessageRisk(messageId, textHash, riskData);
-=======
-                        message.messageId = messageId;
-                        message.element.dataset.spaiRiskScore = String(riskScore);
-                        message.element.dataset.spaiRiskLevel = msgRiskLevel;
-                        try {
-                          message.element.dataset.spaiSuspiciousPhrases = JSON.stringify((response.analysis.suspiciousPhrases || []).slice(0, 12));
-                        } catch (_) {}
-                        if (messageId) {
-                          messageRiskCache.set(messageId, {
-                            riskScore,
-                            riskLevel: msgRiskLevel,
-                            suspiciousPhrases: (response.analysis.suspiciousPhrases || []).slice(0, 12)
-                          });
-                        }
->>>>>>> f4e6e47 (docs: sync documentation with code changes)
                         
                         // RETRY-SAFE: Only mark as analyzed after successful response
                         message.element.dataset.spaiAnalyzed = 'true';
@@ -2785,17 +2746,11 @@ function extractFullWhatsAppConversation() {
             }
 
             const messageId = getMessageIdFromElement(el);
-<<<<<<< HEAD
             const textHash = getMessageTextHash(text); // Stable hash for cache lookup
             messages.push({
                 element: el,
                 messageId, // Stable-ish id used for cached highlight reapplication
                 textHash,  // Text hash as fallback when data-id changes
-=======
-            messages.push({
-                element: el,
-                messageId, // Stable-ish id used for cached highlight reapplication
->>>>>>> f4e6e47 (docs: sync documentation with code changes)
                 textElement: textEl, // Store reference to actual text element for reliable highlighting
                 text,
                 sender: direction === 'out' ? 'You' : 'Contact',

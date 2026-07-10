@@ -39,6 +39,10 @@ export class HybridScorer {
     const imageScore = this.normalizeScore(imageAnalysis.riskScore, imageAnalysis.maliciousCount);
     const linguisticScore = this.normalizeScore(linguisticFeatures.overall?.score, linguisticFeatures.overall?.anomalyScore);
 
+    const rawSentimentScore = this.normalizeScore(sentimentAnalysis.manipulationScore);
+    const rawPhishingScore = this.normalizeScore(phishingAnalysis.riskScore);
+    const rawLinguisticScore = this.normalizeScore(linguisticFeatures.overall?.score);
+
     // Calculate weighted final score
     let finalRiskScore = (
       sentimentScore * this.weights.sentiment +
@@ -56,9 +60,9 @@ export class HybridScorer {
     
     // Boost score if multiple indicators present
     const indicatorCount = [
-      sentimentScore > 0.3,
-      phishingScore > 0.5,
-      linguisticScore > 0.4
+      rawSentimentScore > 0.3,
+      rawPhishingScore > 0.5,
+      rawLinguisticScore > 0.4
     ].filter(Boolean).length;
     
     if (indicatorCount >= 2 && finalRiskScore < 60) {
@@ -66,6 +70,9 @@ export class HybridScorer {
       finalRiskScore = Math.max(finalRiskScore, 60);
     }
 
+    if (indicatorCount >= 3 && rawPhishingScore >= 0.75 && finalRiskScore < this.thresholds.high) {
+      finalRiskScore = this.thresholds.high;
+    }
     // Determine risk level
     const riskLevel = this.determineRiskLevel(finalRiskScore);
 
@@ -126,7 +133,7 @@ export class HybridScorer {
    * Normalize score from different sources to 0-1 range
    */
   normalizeScore(score, confidence = null) {
-    if (score === undefined || score === null) return 0;
+    if (score === undefined || score === null || Number.isNaN(score)) return 0;
     
     let normalized = score;
     
@@ -311,4 +318,3 @@ export class HybridScorer {
 }
 
 export default HybridScorer;
-

@@ -473,17 +473,19 @@ Content extracted successfully! You can now use the Summarize or Analyze buttons
 }
 
 /**
- * Show results section with safe HTML
+ * Show results section without rendering untrusted HTML.
  */
 function showResults(title, content) {
   if (!elements.resultsContent || !elements.resultsSection) return;
 
-  // Sanitize title but allow safe content formatting (for now, content is already formatted)
-  const safeTitle = escapeHTML(title);
+  const heading = document.createElement('h3');
+  heading.textContent = title || '';
 
-  // Note: content may contain safe HTML like <strong>, <span> which we want to preserve
-  // Only escape if it's user-generated content
-  elements.resultsContent.innerHTML = `<h3>${safeTitle}</h3><div>${content}</div>`;
+  const body = document.createElement('div');
+  body.className = 'results-text';
+  body.textContent = content || '';
+
+  elements.resultsContent.replaceChildren(heading, body);
   elements.resultsSection.style.display = 'block';
 }
 
@@ -491,7 +493,7 @@ function showResults(title, content) {
  * Clear results
  */
 function clearResults() {
-  elements.resultsContent.innerHTML = '';
+  elements.resultsContent.replaceChildren();
   elements.resultsSection.style.display = 'none';
 }
 
@@ -499,7 +501,7 @@ function clearResults() {
  * Show error message
  */
 function showError(message) {
-  showResults('Error', `<span style="color: var(--danger-color);">${message}</span>`);
+  showResults('Error', message || 'Unknown error');
 }
 
 /**
@@ -615,7 +617,6 @@ function displayAdvancedMetrics(analysis) {
   // Update lexicon scores
   const dominantLexicons = analysis.originalAnalysis?.sentiment?.dominantLexicons;
   if (dominantLexicons && dominantLexicons.length > 0) {
-    const lexicons = dominantLexicons;
     const explanations = {
       urgency: 'Uses time pressure',
       authority: 'Claims authority',
@@ -625,50 +626,68 @@ function displayAdvancedMetrics(analysis) {
       credential: 'Requests credentials',
       trust: 'False trust markers'
     };
-
-    elements.lexiconScores.innerHTML = lexicons.map(lex => 
-      `<span class="lexicon-tag">${explanations[lex] || lex}</span>`
-    ).join('');
+    elements.lexiconScores.replaceChildren(...dominantLexicons.map(lex => {
+      const tag = document.createElement('span');
+      tag.className = 'lexicon-tag';
+      tag.textContent = explanations[lex] || lex;
+      return tag;
+    }));
   } else {
-    elements.lexiconScores.innerHTML = '<span class="lexicon-tag">None detected</span>';
+    const tag = document.createElement('span');
+    tag.className = 'lexicon-tag';
+    tag.textContent = 'None detected';
+    elements.lexiconScores.replaceChildren(tag);
   }
 
   // Update linguistic anomalies
   const linguisticAnomalies = analysis.originalAnalysis?.sentiment?.linguisticFeatures?.anomalies;
   if (linguisticAnomalies && linguisticAnomalies.length > 0) {
-    const anomalies = linguisticAnomalies;
-    elements.anomaliesList.innerHTML = anomalies.map(anomaly => 
-      `<div class="anomaly-item">${anomaly}</div>`
-    ).join('');
+    elements.anomaliesList.replaceChildren(...linguisticAnomalies.map(anomaly => {
+      const item = document.createElement('div');
+      item.className = 'anomaly-item';
+      item.textContent = anomaly;
+      return item;
+    }));
   } else {
-    elements.anomaliesList.innerHTML = '<div class="anomaly-item">No anomalies found</div>';
+    const item = document.createElement('div');
+    item.className = 'anomaly-item';
+    item.textContent = 'No anomalies found';
+    elements.anomaliesList.replaceChildren(item);
   }
 
   // Update confidence breakdown
   if (analysis.breakdown) {
     const breakdown = analysis.breakdown;
-    elements.confidenceScores.innerHTML = `
-      <div class="confidence-item">
-        <span class="confidence-label">Sentiment</span>
-        <div class="confidence-bar"><div class="confidence-fill" style="width: ${breakdown.sentiment}%"></div></div>
-        <span class="confidence-value">${breakdown.sentiment}%</span>
-      </div>
-      <div class="confidence-item">
-        <span class="confidence-label">Phishing</span>
-        <div class="confidence-bar"><div class="confidence-fill" style="width: ${breakdown.phishing}%"></div></div>
-        <span class="confidence-value">${breakdown.phishing}%</span>
-      </div>
-      <div class="confidence-item">
-        <span class="confidence-label">Image</span>
-        <div class="confidence-bar"><div class="confidence-fill" style="width: ${breakdown.image}%"></div></div>
-        <span class="confidence-value">${breakdown.image}%</span>
-      </div>
-      <div class="confidence-item">
-        <span class="confidence-label">Linguistic</span>
-        <div class="confidence-bar"><div class="confidence-fill" style="width: ${breakdown.linguistic}%"></div></div>
-        <span class="confidence-value">${breakdown.linguistic}%</span>
-      </div>
-    `;
+    const labels = [
+      ['sentiment', 'Sentiment'],
+      ['phishing', 'Phishing'],
+      ['image', 'Image'],
+      ['linguistic', 'Linguistic']
+    ];
+    const items = labels.map(([key, label]) => {
+      const value = Math.max(0, Math.min(100, Number(breakdown[key]) || 0));
+      const item = document.createElement('div');
+      item.className = 'confidence-item';
+
+      const labelNode = document.createElement('span');
+      labelNode.className = 'confidence-label';
+      labelNode.textContent = label;
+
+      const bar = document.createElement('div');
+      bar.className = 'confidence-bar';
+      const fill = document.createElement('div');
+      fill.className = 'confidence-fill';
+      fill.style.width = `${value}%`;
+      bar.appendChild(fill);
+
+      const valueNode = document.createElement('span');
+      valueNode.className = 'confidence-value';
+      valueNode.textContent = `${value}%`;
+
+      item.append(labelNode, bar, valueNode);
+      return item;
+    });
+    elements.confidenceScores.replaceChildren(...items);
   }
 }
 

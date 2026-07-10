@@ -15,6 +15,19 @@ export class SentimentAnalyzer {
     this.emotionAnalyzer = new EmotionAnalyzer();
   }
 
+  async withSession(options, operation) {
+    let session = null;
+    try {
+      session = await this.aiManager.createSession(options);
+      return await operation(session);
+    } finally {
+      if (session) {
+        await this.aiManager.destroySession(session).catch((cleanupError) => {
+          console.warn('Failed to destroy sentiment analysis session:', cleanupError?.message || cleanupError);
+        });
+      }
+    }
+  }
   /**
    * Robustly parse JSON with common AI response formatting issues
    */
@@ -100,8 +113,7 @@ Provide JSON response:
   "recommendation": "SAFE|CAUTION|WARNING|DANGEROUS"
 }`;
 
-      const session = await this.aiManager.createSession({ temperature: 0.5 });
-      const response = await session.prompt(prompt);
+      const response = await this.withSession({ temperature: 0.5 }, async (session) => await session.prompt(prompt));
       
       console.log('Raw AI response for sentiment:', response);
       
@@ -130,7 +142,6 @@ Provide JSON response:
         analysis = this.parseSentimentText(response);
       }
 
-      await this.aiManager.destroySession();
       return analysis;
 
     } catch (error) {
@@ -276,8 +287,7 @@ Provide VALID JSON (no newlines in strings, all strings properly escaped):
 
 IMPORTANT: Return ONLY valid JSON. No markdown, no extra text. Ensure all quotes are closed.`;
 
-      const session = await this.aiManager.createSession({ temperature: 0.5 });
-      const response = await session.prompt(prompt);
+      const response = await this.withSession({ temperature: 0.5 }, async (session) => await session.prompt(prompt));
 
       console.log('Raw AI response:', response);
 
@@ -309,12 +319,10 @@ IMPORTANT: Return ONLY valid JSON. No markdown, no extra text. Ensure all quotes
         analysis = this.parseSentimentText(response);
       }
 
-      await this.aiManager.destroySession();
       return analysis;
 
     } catch (error) {
       console.error('Error in AI analysis:', error.message);
-      await this.aiManager.destroySession().catch(() => {});
       return {
         semanticScore: 0,
         manipulationTechniques: [],
@@ -393,8 +401,7 @@ Provide JSON:
   "recommendation": "REPLY|IGNORE|BLOCK"
 }`;
 
-      const session = await this.aiManager.createSession({ temperature: 0.3 });
-      const response = await session.prompt(prompt);
+      const response = await this.withSession({ temperature: 0.3 }, async (session) => await session.prompt(prompt));
       
       const jsonMatch = response.match(/\{[\s\S]*\}/);
       let analysis = null;
@@ -403,7 +410,6 @@ Provide JSON:
         analysis = JSON.parse(jsonMatch[0]);
       }
 
-      await this.aiManager.destroySession();
       return analysis;
 
     } catch (error) {
@@ -413,4 +419,3 @@ Provide JSON:
 }
 
 export default SentimentAnalyzer;
-

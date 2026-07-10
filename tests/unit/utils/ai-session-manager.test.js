@@ -37,11 +37,14 @@ describe('AISessionManager', () => {
     // Mock self.LanguageModel
     global.self = global.self || {};
     global.self.LanguageModel = {
+      availability: jest.fn().mockResolvedValue('readily'),
+      params: jest.fn().mockResolvedValue({ defaultTemperature: 0.8, defaultTopK: 40, maxTopK: 40 }),
       create: jest.fn().mockResolvedValue(mockSession)
     };
 
     // Mock self.Summarizer
     global.self.Summarizer = {
+      availability: jest.fn().mockResolvedValue('readily'),
       create: jest.fn().mockResolvedValue({
         summarize: jest.fn().mockResolvedValue('Summary of content'),
         summarizeStreaming: jest.fn().mockReturnValue(
@@ -118,10 +121,10 @@ describe('AISessionManager', () => {
     });
 
     test('should return default capabilities even if error occurs', async () => {
-      global.self.LanguageModel.create = jest.fn().mockRejectedValue(new Error('AI unavailable'));
+      global.self.LanguageModel.availability = jest.fn().mockRejectedValue(new Error('AI unavailable'));
       const capabilities = await manager.getCapabilities();
-      expect(capabilities.available).toBe(true);
-      expect(capabilities.availability).toBe('readily');
+      expect(capabilities.available).toBe(false);
+      expect(capabilities.availability).toBe('no');
     });
 
     test('should have valid numeric values for temperature and topK', async () => {
@@ -153,31 +156,27 @@ describe('AISessionManager', () => {
       expect(manager.session).toEqual(mockSession);
     });
 
-    test('should return mock session on timeout', async () => {
+    test('should reject on timeout', async () => {
       const slowPromise = new Promise((resolve) => {
         setTimeout(() => resolve(mockSession), 5000);
       });
       global.self.LanguageModel.create = jest.fn().mockReturnValue(slowPromise);
 
-      const session = await manager.createSession();
-      expect(session).toBeDefined();
-      expect(session.prompt).toBeDefined();
+      await expect(manager.createSession()).rejects.toThrow('AI_SESSION_FAILED');
     });
 
-    test('should return mock session on AI unavailable error', async () => {
+    test('should reject on AI unavailable error', async () => {
       global.self.LanguageModel.create = jest.fn().mockRejectedValue(
         new Error('AI not available')
       );
-      const session = await manager.createSession();
-      expect(session).toBeDefined();
-      expect(typeof session.prompt).toBe('function');
+
+      await expect(manager.createSession()).rejects.toThrow('AI_SESSION_FAILED');
     });
 
-    test('should return mock session on generic error', async () => {
+    test('should reject on generic error', async () => {
       global.self.LanguageModel.create = jest.fn().mockRejectedValue(new Error('Network error'));
-      const session = await manager.createSession();
-      expect(session).toBeDefined();
-      expect(typeof session.destroy).toBe('function');
+
+      await expect(manager.createSession()).rejects.toThrow('AI_SESSION_FAILED');
     });
 
     test('should merge options with defaults', async () => {
@@ -458,23 +457,22 @@ describe('AISessionManager', () => {
       expect(promptCall).toContain('150 words');
     });
 
-    test('should handle session creation errors gracefully', async () => {
+    test('should surface session creation errors', async () => {
       global.self.LanguageModel.create = jest.fn().mockRejectedValue(new Error('Creation failed'));
-      const result = await manager.promptSumm('Text');
-      expect(result).toBeDefined();
+      await expect(manager.promptSumm('Text')).rejects.toThrow('AI_SESSION_FAILED');
     });
   });
 
   describe('getSummarizationCapabilities', () => {
-    test('should return true for summarization availability', async () => {
+    test('should return availability details for summarization', async () => {
       const result = await manager.getSummarizationCapabilities();
-      expect(result).toBe(true);
+      expect(result).toEqual({ available: true, availability: 'readily' });
     });
 
-    test('should return true even on error', async () => {
-      global.self.Summarizer.create = jest.fn().mockRejectedValue(new Error('Error'));
+    test('should return unavailable details on availability error', async () => {
+      global.self.Summarizer.availability = jest.fn().mockRejectedValue(new Error('Error'));
       const result = await manager.getSummarizationCapabilities();
-      expect(result).toBe(true);
+      expect(result).toEqual({ available: false, availability: 'no', error: 'Error' });
     });
   });
 

@@ -148,7 +148,7 @@ chrome.runtime.sendMessage({
 ```
 
 ##### ANALYZE_TAB_CONTENT
-Analyze content with custom prompt.
+Analyze page content with the local structured threat classifier. Arbitrary prompts and model options are ignored for safety; use fixed schemas instead of free-form model output.
 
 **Request**:
 ```javascript
@@ -156,17 +156,14 @@ chrome.runtime.sendMessage({
   type: 'ANALYZE_TAB_CONTENT',
   data: {
     content: 'Content to analyze...',
-    prompt: 'What are the main topics?',
-    options: {
-      temperature: 0.8,
-      topK: 40
-    }
+    url: 'https://example.test',
+    title: 'Example page'
   }
 }, (response) => {
-  console.log(response.analysis);
+  console.log(response.analysis); // Human-readable text derived from response.result
+  console.log(response.result);   // Validated structured result
 });
 ```
-
 ## Content Script API
 
 ### Messages to Content Script
