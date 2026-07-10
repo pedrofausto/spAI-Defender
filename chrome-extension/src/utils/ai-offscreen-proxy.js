@@ -41,7 +41,6 @@ export class AIOffscreenProxy {
     this.availability = null;
     this.availabilityChecked = false;
     this.aiAvailable = false;
-    this._currentSessionId = null;
     this._creatingOffscreen = null;
     this._sessionOptions = new Map(); // sessionId -> normalized options (at least outputLanguage)
   }
@@ -147,9 +146,9 @@ export class AIOffscreenProxy {
       const env = this._envInfo();
       console.log('[spai][ai-proxy] checkAvailability()', env);
       const caps = await this._send('capabilities', {}, 4000);
-      const available = caps?.available || 'no';
-      this.availability = available;
-      this.aiAvailable = available === 'readily' || available === 'after-download';
+      const availability = caps?.availability || (typeof caps?.available === 'string' ? caps.available : 'no');
+      this.availability = availability;
+      this.aiAvailable = availability === 'readily' || availability === 'after-download';
       this.availabilityChecked = true;
       console.log('[spai][ai-proxy] availability:', this.availability);
       return this.availability;
@@ -182,7 +181,7 @@ export class AIOffscreenProxy {
     const caps = await this._send('capabilities', {}, 4000);
     return {
       available: true,
-      availability: caps?.available || 'no',
+      availability: caps?.availability || (typeof caps?.available === 'string' ? caps.available : availability),
       defaultTemperature: caps?.defaultTemperature || 0.8,
       defaultTopK: caps?.defaultTopK || 40,
       maxTopK: caps?.maxTopK || 40
@@ -192,7 +191,7 @@ export class AIOffscreenProxy {
   async hasSummarizationAPI() {
     try {
       const res = await this._send('summarizerAvailable', {}, 4000);
-      return !!res?.available;
+      return res?.available === true || res?.availability === 'readily' || res?.availability === 'after-download';
     } catch (e) {
       console.warn('[spai][ai-proxy] summarizerAvailable check failed:', e?.message || e);
       return false;
@@ -216,10 +215,11 @@ export class AIOffscreenProxy {
 
     const normalized = normalizeSessionOptions(options);
     const { sessionId } = await this._send('createSession', { options: normalized }, 8000);
-    this._currentSessionId = sessionId;
     this._sessionOptions.set(sessionId, normalized);
+    return this._createSessionProxy(sessionId, normalized);
+  }
 
-    // Session proxy for compatibility with existing code (session.prompt(...))
+  _createSessionProxy(sessionId, normalized) {
     return {
       __spaiSessionProxy: true,
       sessionId,
@@ -229,48 +229,29 @@ export class AIOffscreenProxy {
         return res.text;
       },
       destroy: async () => {
-        await this._send('destroySession', { sessionId }, 8000);
+        await this.destroySession({ sessionId });
       }
     };
   }
 
   async getOrCreateSession(options = {}) {
-    if (this._currentSessionId) {
-      const sessionId = this._currentSessionId;
-      const normalized = normalizeSessionOptions(options);
-      // update stored options (keep latest outputLanguage)
-      this._sessionOptions.set(sessionId, { ...(this._sessionOptions.get(sessionId) || {}), ...normalized });
-      return {
-        __spaiSessionProxy: true,
-        sessionId,
-        prompt: async (promptText) => {
-          const opts = this._sessionOptions.get(sessionId) || normalized;
-          const res = await this._send('prompt', { sessionId, prompt: promptText, options: { outputLanguage: opts.outputLanguage } }, 60000);
-          return res.text;
-        },
-        destroy: async () => {
-          await this._send('destroySession', { sessionId }, 8000);
-        }
-      };
-    }
     return await this.createSession(options);
   }
 
   async destroySession(session = null) {
-    const sessionId = session?.sessionId || this._currentSessionId;
+    const sessionId = session?.sessionId;
     if (!sessionId) return;
     await this._send('destroySession', { sessionId }, 8000);
-    if (sessionId === this._currentSessionId) this._currentSessionId = null;
     this._sessionOptions.delete(sessionId);
   }
 
   async reset() {
-    await this.destroySession().catch(() => {});
+    const sessionIds = Array.from(this._sessionOptions.keys());
+    await Promise.all(sessionIds.map((sessionId) => this.destroySession({ sessionId }).catch(() => {})));
     this.availability = null;
     this.availabilityChecked = false;
     this.aiAvailable = false;
   }
-
   /**
    * Mirrors AISessionManager.summarize() behavior.
    */
@@ -297,6 +278,3 @@ export class AIOffscreenProxy {
 }
 
 export default AIOffscreenProxy;
-
-
-

@@ -156,7 +156,7 @@ describe('ImageAnalyzer', () => {
       await analyzer.analyzeWithPrompt('https://bank.com/img.jpg', 'financial page');
       expect(mockSession.prompt).toHaveBeenCalled();
       const promptArg = mockSession.prompt.mock.calls[0][0];
-      expect(promptArg).toContain('security expert');
+      expect(promptArg).toContain('local Gemini Nano threat recognition engine');
       expect(promptArg).toContain('https://bank.com/img.jpg');
     });
 
@@ -186,7 +186,9 @@ describe('ImageAnalyzer', () => {
 
     test('should handle AI session errors', async () => {
       mockAIManager.createSession.mockRejectedValue(new Error('Session error'));
-      await expect(analyzer.analyzeWithPrompt('https://example.com/img.jpg', 'page')).rejects.toThrow();
+      const result = await analyzer.analyzeWithPrompt('https://example.com/img.jpg', 'page');
+      expect(result.classification).toBe('INCONCLUSIVE');
+      expect(result.riskLevel).toBe('UNKNOWN');
     });
 
     test('should include page context in analysis', async () => {
@@ -243,7 +245,7 @@ describe('ImageAnalyzer', () => {
 
       const images = ['img1.jpg', 'img2.jpg'];
       const result = await analyzer.analyzePageImages(images, 'page');
-      expect(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).toContain(result.maxRiskLevel);
+      expect(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL', 'UNKNOWN']).toContain(result.maxRiskLevel);
     });
 
     test('should handle errors during individual image analysis', async () => {
@@ -569,7 +571,7 @@ describe('ImageAnalyzer', () => {
 
     test('should have valid risk levels', async () => {
       const result = await analyzer.analyzeImage('https://example.com/img.jpg', 'page');
-      const validLevels = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
+      const validLevels = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL', 'UNKNOWN'];
       expect(validLevels).toContain(result.riskLevel);
     });
 

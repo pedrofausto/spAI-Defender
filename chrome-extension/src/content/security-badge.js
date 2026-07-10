@@ -10,6 +10,66 @@ export class SecurityBadge {
     this.currentRiskLevel = 'UNKNOWN';
   }
 
+  normalizeRiskLevel(riskLevel) {
+    const level = String(riskLevel || 'UNKNOWN').toUpperCase();
+    return ['LOW', 'MEDIUM', 'MEDIUM_HIGH', 'HIGH', 'CRITICAL', 'UNKNOWN'].includes(level) ? level : 'UNKNOWN';
+  }
+
+  normalizeRiskScore(riskScore) {
+    const score = Number(riskScore);
+    if (!Number.isFinite(score)) return 0;
+    return Math.max(0, Math.min(100, Math.round(score)));
+  }
+
+  createElement(tagName, className, text = null) {
+    const element = document.createElement(tagName);
+    if (className) element.className = className;
+    if (text !== null) element.textContent = String(text);
+    return element;
+  }
+
+  buildRiskIndicator(riskLevel, riskScore) {
+    const container = this.createElement('div', 'spai-risk-indicator');
+    const level = this.createElement('div', 'spai-risk-level', `Risk: ${riskLevel}`);
+    const score = this.createElement('div', 'spai-risk-score', `${riskScore}/100`);
+    const bar = this.createElement('div', 'spai-risk-bar');
+    const fill = this.createElement('div', 'spai-risk-fill');
+    fill.style.width = `${riskScore}%`;
+    bar.appendChild(fill);
+    container.append(level, score, bar);
+    return container;
+  }
+
+  buildIndicators(indicators) {
+    const safeIndicators = Array.isArray(indicators) ? indicators.slice(0, 3) : [];
+    if (safeIndicators.length === 0) return null;
+
+    const container = this.createElement('div', 'spai-indicators');
+    for (const indicator of safeIndicators) {
+      container.appendChild(this.createElement('span', 'spai-indicator', indicator));
+    }
+    return container;
+  }
+
+  buildFooter() {
+    const footer = this.createElement('div', 'spai-badge-footer');
+    const button = this.createElement('button', 'spai-action-btn', 'View Details');
+    button.addEventListener('click', () => {
+      chrome.runtime.sendMessage({ type: 'SHOW_DETAILS' });
+    });
+    footer.appendChild(button);
+    return footer;
+  }
+
+  buildBody(riskLevel, riskScore, indicators) {
+    const body = this.createElement('div', 'spai-badge-body');
+    body.appendChild(this.buildRiskIndicator(riskLevel, riskScore));
+    const indicatorList = this.buildIndicators(indicators);
+    if (indicatorList) body.appendChild(indicatorList);
+    body.appendChild(this.buildFooter());
+    return body;
+  }
+
   /**
    * Cria e exibe o badge
    */
@@ -18,45 +78,31 @@ export class SecurityBadge {
       this.remove();
     }
 
-    this.currentRiskLevel = riskLevel;
-    
+    const safeRiskLevel = this.normalizeRiskLevel(riskLevel);
+    const safeRiskScore = this.normalizeRiskScore(riskScore);
+    this.currentRiskLevel = safeRiskLevel;
+
     const badge = document.createElement('div');
     badge.id = 'spai-security-badge';
-    badge.className = `spai-badge spai-risk-${riskLevel.toLowerCase()}`;
-    
-    badge.innerHTML = `
-      <div class="spai-badge-header">
-        <span class="spai-badge-icon">🛡️</span>
-        <span class="spai-badge-title">spAI Security</span>
-        <button class="spai-badge-close" onclick="this.parentElement.parentElement.remove()">×</button>
-      </div>
-      <div class="spai-badge-body">
-        <div class="spai-risk-indicator">
-          <div class="spai-risk-level">Risk: ${riskLevel}</div>
-          <div class="spai-risk-score">${riskScore}/100</div>
-          <div class="spai-risk-bar">
-            <div class="spai-risk-fill" style="width: ${riskScore}%"></div>
-          </div>
-        </div>
-        ${indicators.length > 0 ? `
-          <div class="spai-indicators">
-            ${indicators.slice(0, 3).map(ind => `<span class="spai-indicator">${ind}</span>`).join('')}
-          </div>
-        ` : ''}
-        <div class="spai-badge-footer">
-          <button class="spai-action-btn" onclick="chrome.runtime.sendMessage({type: 'SHOW_DETAILS'})">
-            View Details
-          </button>
-        </div>
-      </div>
-    `;
+    badge.className = `spai-badge spai-risk-${safeRiskLevel.toLowerCase()}`;
+
+    const header = this.createElement('div', 'spai-badge-header');
+    header.append(
+      this.createElement('span', 'spai-badge-icon', '🛡️'),
+      this.createElement('span', 'spai-badge-title', 'spAI Security')
+    );
+    const closeButton = this.createElement('button', 'spai-badge-close', '×');
+    closeButton.addEventListener('click', () => this.remove());
+    header.appendChild(closeButton);
+
+    badge.append(header, this.buildBody(safeRiskLevel, safeRiskScore, indicators));
 
     document.body.appendChild(badge);
     this.badge = badge;
     this.isVisible = true;
 
     // Auto-hide após 10 segundos se LOW risk
-    if (riskLevel === 'LOW' && riskScore < 30) {
+    if (safeRiskLevel === 'LOW' && safeRiskScore < 30) {
       setTimeout(() => this.remove(), 10000);
     }
 
@@ -84,27 +130,15 @@ export class SecurityBadge {
       return;
     }
 
-    this.currentRiskLevel = riskLevel;
+    const safeRiskLevel = this.normalizeRiskLevel(riskLevel);
+    const safeRiskScore = this.normalizeRiskScore(riskScore);
+    this.currentRiskLevel = safeRiskLevel;
+    this.badge.className = `spai-badge spai-risk-${safeRiskLevel.toLowerCase()}`;
+
     const body = this.badge.querySelector('.spai-badge-body');
-    
     if (body) {
-      body.innerHTML = `
-        <div class="spai-risk-indicator">
-          <div class="spai-risk-level">Risk: ${riskLevel}</div>
-          <div class="spai-risk-score">${riskScore}/100</div>
-          <div class="spai-risk-bar">
-            <div class="spai-risk-fill" style="width: ${riskScore}%"></div>
-          </div>
-        </div>
-        ${indicators.length > 0 ? `
-          <div class="spai-indicators">
-            ${indicators.slice(0, 3).map(ind => `<span class="spai-indicator">${ind}</span>`).join('')}
-          </div>
-        ` : ''}
-        <div class="spai-badge-footer">
-          <button class="spai-action-btn">View Details</button>
-        </div>
-      `;
+      const newBody = this.buildBody(safeRiskLevel, safeRiskScore, indicators);
+      body.replaceChildren(...newBody.childNodes);
     }
   }
 

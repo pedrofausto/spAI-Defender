@@ -202,13 +202,14 @@ export class PhishingLexicons {
    * @returns {Object} Lexicon scores with detailed breakdown
    */
   calculateLexiconScores(text) {
-    const cacheKey = text.substring(0, 100);
+    const normalizedInput = typeof text === 'string' ? text : '';
+    const cacheKey = normalizedInput.substring(0, 100);
     const cached = this._getFromCache(cacheKey);
     if (cached) {
       return cached;
     }
 
-    const normalizedText = text.toLowerCase();
+    const normalizedText = normalizedInput.toLowerCase();
     const scores = {
       urgency: 0,
       authority: 0,
@@ -279,11 +280,12 @@ export class PhishingLexicons {
    * High trust words in phishing context create false legitimacy
    */
   calculateTrustManipulation(text) {
+    const normalizedText = typeof text === 'string' ? text.toLowerCase() : '';
     const trustTerms = this.lexicons.trust;
     let trustScore = 0;
 
     for (const [term, weight] of Object.entries(trustTerms)) {
-      if (text.includes(term)) {
+      if (normalizedText.includes(term)) {
         trustScore += weight;
       }
     }
@@ -363,4 +365,3 @@ export class PhishingLexicons {
 }
 
 export default PhishingLexicons;
-

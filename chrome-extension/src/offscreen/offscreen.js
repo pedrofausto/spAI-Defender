@@ -37,23 +37,63 @@ function normalizeSessionOptions(inputOptions = {}) {
   return options;
 }
 
-async function getLanguageModelCapabilities() {
-  if (typeof self === 'undefined' || !self.LanguageModel) {
-    return { available: 'no' };
-  }
-  if (typeof self.LanguageModel.capabilities === 'function') {
-    return await self.LanguageModel.capabilities();
-  }
-  // Fallback: availability() exists in some versions
-  if (typeof self.LanguageModel.availability === 'function') {
-    const available = await self.LanguageModel.availability();
-    return { available };
-  }
-  return { available: 'no' };
+function normalizeLanguageModelParams(params = {}) {
+  return {
+    defaultTemperature: typeof params.defaultTemperature === 'number' ? params.defaultTemperature : 0.8,
+    defaultTopK: typeof params.defaultTopK === 'number' ? params.defaultTopK : 40,
+    maxTopK: typeof params.maxTopK === 'number' ? params.maxTopK : 40
+  };
 }
 
-function getSummarizerAvailability() {
-  return typeof self !== 'undefined' && typeof self.Summarizer !== 'undefined';
+function isAvailableStatus(availability) {
+  return availability === 'readily' || availability === 'after-download';
+}
+
+async function getLanguageModelAvailability(options = {}) {
+  if (typeof self === 'undefined' || !self.LanguageModel) {
+    return 'no';
+  }
+  if (typeof self.LanguageModel.availability === 'function') {
+    return await self.LanguageModel.availability(options);
+  }
+  if (typeof self.LanguageModel.capabilities === 'function') {
+    const capabilities = await self.LanguageModel.capabilities(options);
+    return capabilities?.available || capabilities?.availability || 'no';
+  }
+  return typeof self.LanguageModel.create === 'function' ? 'readily' : 'no';
+}
+
+async function getLanguageModelParams() {
+  if (typeof self === 'undefined' || !self.LanguageModel) {
+    return normalizeLanguageModelParams();
+  }
+  if (typeof self.LanguageModel.params === 'function') {
+    return normalizeLanguageModelParams(await self.LanguageModel.params());
+  }
+  if (typeof self.LanguageModel.capabilities === 'function') {
+    return normalizeLanguageModelParams(await self.LanguageModel.capabilities());
+  }
+  return normalizeLanguageModelParams();
+}
+
+async function getLanguageModelCapabilities(options = {}) {
+  const availability = await getLanguageModelAvailability(options);
+  const params = await getLanguageModelParams();
+  return {
+    available: isAvailableStatus(availability),
+    availability,
+    ...params
+  };
+}
+
+async function getSummarizerAvailability(options = {}) {
+  if (typeof self === 'undefined' || !self.Summarizer) {
+    return 'no';
+  }
+  if (typeof self.Summarizer.availability === 'function') {
+    return await self.Summarizer.availability(options);
+  }
+  return typeof self.Summarizer.create === 'function' ? 'readily' : 'no';
 }
 
 async function ensureSession(sessionId, options = {}) {
@@ -92,7 +132,6 @@ async function destroySession(sessionId) {
 
 async function summarizeText(text, options = {}) {
   if (typeof self === 'undefined' || !self.Summarizer) {
-    // Keep parity with previous behavior: throw to let caller handle fallback
     throw new Error('AI_UNAVAILABLE: Chrome Built-in AI Summarizer is not available');
   }
 
@@ -102,6 +141,11 @@ async function summarizeText(text, options = {}) {
     length: options.length || 'medium',
     sharedContext: options.context || ''
   };
+
+  const availability = await getSummarizerAvailability(summarizerOptions);
+  if (!isAvailableStatus(availability)) {
+    throw new Error(`AI_UNAVAILABLE: Chrome Built-in AI Summarizer is not available (${availability})`);
+  }
 
   const summarizer = await self.Summarizer.create(summarizerOptions);
   try {
@@ -125,7 +169,7 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
             ready: true,
             context: 'offscreen',
             languageModelPresent: typeof self !== 'undefined' && !!self.LanguageModel,
-            summarizerPresent: getSummarizerAvailability()
+            summarizerPresent: typeof self !== 'undefined' && !!self.Summarizer
           }
         };
       }
@@ -136,16 +180,19 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       }
 
       case 'summarizerAvailable': {
-        return { ok: true, result: { available: getSummarizerAvailability() } };
+        const availability = await getSummarizerAvailability();
+        return { ok: true, result: { available: isAvailableStatus(availability), availability } };
       }
 
       case 'diagnostics': {
         const languageModelPresent = typeof self !== 'undefined' && !!self.LanguageModel;
-        const summarizerPresent = getSummarizerAvailability();
+        const summarizerPresent = typeof self !== 'undefined' && !!self.Summarizer;
+        let summarizerAvailability = 'no';
         let caps = null;
         let capsError = null;
         try {
           caps = await getLanguageModelCapabilities();
+          summarizerAvailability = await getSummarizerAvailability();
         } catch (e) {
           capsError = e?.message || String(e);
         }
@@ -156,6 +203,7 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
             userAgent: navigator.userAgent,
             languageModelPresent,
             summarizerPresent,
+            summarizerAvailability,
             capabilities: caps,
             capabilitiesError: capsError
           }
@@ -165,7 +213,6 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       case 'createSession': {
         const { options } = payload || {};
         const created = await ensureSession(null, options || {});
-        // ensureSession can return { session } or { session, sessionId } depending on path
         const sessionId = created.sessionId || nextSessionId();
         if (!created.sessionId) {
           sessions.set(sessionId, created.session);
@@ -189,15 +236,12 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 
         let text;
         try {
-          // Some Chrome builds require outputLanguage on requests (not only on create()).
           text = await session.prompt(prompt, { outputLanguage: outLang });
         } catch (e1) {
           try {
-            // Alternate key name in some builds
             text = await session.prompt(prompt, { language: outLang });
           } catch (e2) {
             try {
-              // Backward/alternate API signature fallback
               text = await session.prompt(prompt);
             } catch (e3) {
               const name = e3?.name || e2?.name || e1?.name || 'Error';
@@ -231,8 +275,5 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 
 console.log('[spai][offscreen] AI runtime ready', {
   languageModelPresent: typeof self !== 'undefined' && !!self.LanguageModel,
-  summarizerPresent: getSummarizerAvailability()
+  summarizerPresent: typeof self !== 'undefined' && !!self.Summarizer
 });
-
-
-

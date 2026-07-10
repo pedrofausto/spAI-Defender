@@ -4,7 +4,7 @@ A powerful Chrome extension that leverages Chrome's Built-in AI (Gemini Nano) to
 
 ## Features
 
-- **Content Extraction**: Extract structured content from any web page including text, headings, links, images, and metadata
+- **Content Extraction**: Extract structured content from web pages including text, headings, links, image URLs, and metadata
 - **AI-Powered Summarization**: Generate concise summaries of web page content
 - **Content Analysis**: Get detailed AI analysis of page content, including main topics, key points, and quality assessment
 - **Custom Prompts**: Ask custom questions about page content using natural language
@@ -252,7 +252,7 @@ Generate a summary of content.
 ```
 
 #### `ANALYZE_TAB_CONTENT`
-Analyze content with AI.
+Analyze content with the local structured threat classifier. Free-form prompts and session options are ignored to avoid prompt-injection and raw model-output risks.
 
 **Request**:
 ```javascript
@@ -260,8 +260,8 @@ Analyze content with AI.
   type: 'ANALYZE_TAB_CONTENT',
   data: {
     content: string,
-    prompt: string,
-    options: Object  // Optional AI session options
+    url: string,
+    title: string
   }
 }
 ```
@@ -270,10 +270,12 @@ Analyze content with AI.
 ```javascript
 {
   success: true,
-  analysis: string
+  analysis: string,
+  result: Object,
+  ignoredPrompt: boolean,
+  mode: 'structured_local_threat_analysis'
 }
 ```
-
 ## Development
 
 ### Prerequisites
@@ -310,6 +312,9 @@ Analyze content with AI.
    - Select "Inspect popup"
    - View popup-specific console
 
+### Image and OCR Scope
+
+Image handling currently uses image URLs, filenames, and surrounding page context only. The extension does not perform OCR, does not inspect pixels, and does not provide image data to Gemini Nano. OCR and visual image analysis are future work and must remain fully local if added.
 ## Privacy & Security
 
 ### Data Privacy

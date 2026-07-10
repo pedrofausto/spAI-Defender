@@ -1,11 +1,14 @@
+import { LocalAIThreatClassifier } from './local-ai-threat-classifier.js';
+
 /**
  * Image Analyzer
- * Analisa imagens para detectar phishing e conteúdo malicioso usando AI nativa
+ * Analisa URL e contexto textual de imagens com IA nativa. Nao realiza OCR nem analise visual.
  */
 
 export class ImageAnalyzer {
   constructor(aiManager) {
     this.aiManager = aiManager;
+    this.localAIClassifier = new LocalAIThreatClassifier(aiManager);
   }
 
   /**
@@ -23,22 +26,25 @@ export class ImageAnalyzer {
         throw new Error('Invalid image URL');
       }
 
-      // Use Chrome Built-in AI Visual Analysis if available
-      // Note: NEW API - LanguageModel directly on self
-      if (typeof self.LanguageModel !== 'undefined') {
+      if (this.aiManager && typeof this.aiManager.checkAvailability === 'function') {
         try {
-          return await this.analyzeWithPrompt(imageUrl, pageContext);
+          const availability = await this.aiManager.checkAvailability();
+          if (availability === 'readily' || availability === 'after-download') {
+            return await this.analyzeWithPrompt(imageUrl, pageContext);
+          }
         } catch (error) {
           console.warn('AI analysis failed:', error);
         }
+      } else if (globalThis.self?.LanguageModel || globalThis.LanguageModel) {
+        return await this.analyzeWithPrompt(imageUrl, pageContext);
       }
 
-      // Fallback: Return safe default
       return {
         isMalicious: false,
         riskScore: 0,
-        riskLevel: 'LOW',
-        description: 'Image analysis not available (AI not supported)',
+        riskLevel: 'UNKNOWN',
+        classification: 'INCONCLUSIVE',
+        description: 'Image URL/context analysis not available (Gemini Nano unavailable)',
         analyzed: false
       };
 
@@ -47,8 +53,9 @@ export class ImageAnalyzer {
       return {
         isMalicious: false,
         riskScore: 0,
-        riskLevel: 'LOW',
-        description: 'Could not analyze image',
+        riskLevel: 'UNKNOWN',
+        classification: 'INCONCLUSIVE',
+        description: 'Could not analyze image URL/context',
         error: error.message
       };
     }
@@ -63,42 +70,26 @@ export class ImageAnalyzer {
    * @returns {Promise<Object>} Análise
    */
   async analyzeWithPrompt(imageUrl, pageContext) {
-    try {
-      const session = await this.aiManager.createSession({ temperature: 0.3 });
+    const analysis = await this.localAIClassifier.classify({
+      inputType: 'IMAGE_CONTEXT',
+      platform: 'WEB',
+      sourceUrl: imageUrl,
+      content: `Image URL: ${imageUrl}\nPage context: ${pageContext || ''}`,
+      deterministicSignals: [`image-url:${imageUrl}`]
+    });
 
-      const prompt = `You are a security expert analyzing a potential phishing image based on its URL and page context.
-
-Image URL: ${imageUrl}
-Page Context: ${pageContext}
-
-Analyze the image URL and context for phishing indicators:
-1. URL pattern analysis (suspicious domains, typosquatting)
-2. Common phishing image naming patterns
-3. Context-based risk assessment
-4. Known phishing CDN patterns
-
-Provide JSON response:
-{
-  "isMalicious": true/false,
-  "riskScore": 0-100,
-  "riskLevel": "LOW|MEDIUM|HIGH|CRITICAL",
-  "threats": ["threat1", "threat2"],
-  "description": "detailed description",
-  "recommendation": "TRUST|CAUTION|AVOID|DELETE",
-  "suspiciousElements": ["element1", "element2"]
-}`;
-
-      const response = await session.prompt(prompt);
-      await this.aiManager.destroySession();
-
-      return this.parseTextAnalysis(response, imageUrl);
-
-    } catch (error) {
-      console.error('Prompt-based analysis error:', error);
-      throw error;
-    }
+    return {
+      ...analysis,
+      imageUrl,
+      isMalicious: analysis.isPhishing || analysis.classification === 'SUSPICIOUS' || analysis.riskScore >= 70,
+      threats: analysis.evidence || [],
+      suspiciousElements: analysis.semanticSignals || [],
+      description: analysis.status === 'VALID'
+        ? 'Text-only image URL/context analysis completed; no OCR or visual pixels were analyzed.'
+        : 'Text-only image URL/context analysis was inconclusive; no OCR or visual pixels were analyzed.',
+      analyzed: analysis.status === 'VALID'
+    };
   }
-
 
   /**
    * Analisa todas as imagens de uma página
@@ -212,6 +203,10 @@ Provide JSON response:
       imageUrl
     };
 
+    if (typeof text !== 'string') {
+      return analysis;
+    }
+
     const lowerText = text.toLowerCase();
 
     // Detect malicious content
@@ -243,6 +238,9 @@ Provide JSON response:
    */
   extractTextFromResponse(response) {
     try {
+      if (response === null || response === undefined) {
+        return null;
+      }
       if (typeof response === 'string') {
         return response;
       }

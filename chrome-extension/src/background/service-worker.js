@@ -11,6 +11,7 @@ import { ImageAnalyzer } from '../utils/image-analyzer.js';
 import { WhatsAppReader } from '../utils/whatsapp-reader.js';
 import { TelegramReader } from '../utils/telegram-reader.js';
 import { collectAIDiagnostics } from '../utils/ai-diagnostics.js';
+import { AnalysisCache } from '../utils/analysis-cache.js';
 
 const aiManager = new AIOffscreenProxy();
 const phishingDetector = new PhishingDetector(aiManager);
@@ -18,44 +19,31 @@ const sentimentAnalyzer = new SentimentAnalyzer(aiManager);
 const platformDetector = new PlatformDetector();
 const imageAnalyzer = new ImageAnalyzer(aiManager);
 
-// Analysis cache to reduce IDLE time and improve performance
-const analysisCache = new Map();
-const CACHE_SIZE_LIMIT = 50;
+// Analysis cache to reduce IDLE time and improve performance without cross-contaminating analyzers.
+const ANALYSIS_ALGORITHM_VERSION = 'risk-analysis-v2';
+const analysisCache = new AnalysisCache({
+  maxEntries: 50,
+  ttlMs: 5 * 60 * 1000,
+  algorithmVersion: ANALYSIS_ALGORITHM_VERSION
+});
 
-/**
- * Generate cache key from content (first 100 chars + hash)
- */
-function getCacheKey(content) {
-  if (!content || typeof content !== 'string') return 'invalid';
-  const preview = content.substring(0, 100);
-  // Simple hash function
-  let hash = 0;
-  for (let i = 0; i < preview.length; i++) {
-    const char = preview.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // Convert to 32bit integer
-  }
-  return `${preview.substring(0, 20)}_${Math.abs(hash).toString(36)}`;
+async function buildAnalysisCacheKey({ analysisType, url = '', content = '', options = {} }) {
+  return await analysisCache.buildKey({
+    analysisType,
+    url,
+    content,
+    algorithmVersion: ANALYSIS_ALGORITHM_VERSION,
+    options
+  });
 }
 
-/**
- * Get cached result or null
- */
 function getCachedResult(key) {
-  return analysisCache.get(key) || null;
+  return analysisCache.get(key);
 }
 
-/**
- * Store result in cache
- */
 function cacheResult(key, result) {
-  // Evict oldest entries if cache is full
-  if (analysisCache.size >= CACHE_SIZE_LIMIT) {
-    const firstKey = analysisCache.keys().next().value;
-    analysisCache.delete(firstKey);
-  }
   analysisCache.set(key, result);
-  console.log(`💾 Cached analysis result (cache size: ${analysisCache.size}/${CACHE_SIZE_LIMIT})`);
+  console.log(`💾 Cached analysis result (cache size: ${analysisCache.size()}/50)`);
 }
 
 // Extension installation and updates
@@ -276,43 +264,72 @@ async function handleGetTabContent(tabId, sendResponse) {
   }
 }
 
+function normalizeTabAnalysisData(data = {}) {
+  const rawContent = data?.content;
+  const content = typeof rawContent === 'string'
+    ? rawContent
+    : rawContent?.bodyText || rawContent?.text || rawContent?.content || '';
+
+  return {
+    content: String(content || '').trim(),
+    url: typeof data?.url === 'string' ? data.url : (typeof rawContent?.url === 'string' ? rawContent.url : ''),
+    title: typeof data?.title === 'string' ? data.title : (typeof rawContent?.title === 'string' ? rawContent.title : '')
+  };
+}
+
+function formatStructuredTabAnalysis(result) {
+  const evidence = Array.isArray(result.evidence) ? result.evidence : [];
+  const signals = Array.isArray(result.semanticSignals) ? result.semanticSignals : [];
+  const phrases = Array.isArray(result.suspiciousPhrases) ? result.suspiciousPhrases : [];
+  const lines = [
+    `Classification: ${result.classification || 'INCONCLUSIVE'}`,
+    `Risk level: ${result.riskLevel || 'UNKNOWN'}`,
+    `Risk score: ${Number.isFinite(result.riskScore) ? result.riskScore : 0}`,
+    `Confidence: ${Number.isFinite(result.confidence) ? result.confidence : 0}`,
+    `Recommendation: ${result.recommendation || 'CAUTION'}`
+  ];
+
+  if (signals.length > 0) lines.push(`Signals: ${signals.join(', ')}`);
+  if (evidence.length > 0) lines.push(`Evidence: ${evidence.join('; ')}`);
+  if (phrases.length > 0) lines.push(`Suspicious phrases: ${phrases.join('; ')}`);
+  if (result.validationError) lines.push(`Validation: ${result.validationError}`);
+
+  return lines.join('\n');
+}
 /**
- * Analyze tab content using Built-in AI
+ * Analyze tab content using the structured local threat classifier.
  */
 async function handleAnalyzeTabContent(data, sendResponse) {
   try {
-    const { content, prompt, options } = data;
-
-    // Create AI session
-    const session = await aiManager.createSession(options);
-
-    if (!session) {
-      throw new Error('Failed to create AI session');
+    const normalized = normalizeTabAnalysisData(data);
+    if (!normalized.content) {
+      sendResponse({ success: false, error: 'No analyzable content provided' });
+      return;
     }
 
-    // Prepare the analysis prompt
-    const analysisPrompt = prompt || `Analyze the following web page content and provide insights:\n\n${content}`;
-
-    // Get AI response
-    const response = await session.prompt(analysisPrompt);
+    const result = await phishingDetector.detectPhishing(
+      normalized.url,
+      normalized.content,
+      normalized.title,
+      [],
+      false
+    );
 
     sendResponse({
       success: true,
-      analysis: response
+      analysis: formatStructuredTabAnalysis(result),
+      result,
+      ignoredPrompt: Boolean(data?.prompt || data?.options),
+      mode: 'structured_local_threat_analysis'
     });
-
-    // Clean up session
-    await aiManager.destroySession();
-
   } catch (error) {
     console.error('Error analyzing content:', error);
     sendResponse({
       success: false,
-      error: error.message
+      error: error?.message || String(error)
     });
   }
 }
-
 /**
  * Summarize content using Built-in AI Summarization API (optimized)
  */
@@ -487,7 +504,12 @@ async function handlePhishingDetection(data, sendResponse) {
     console.log('🔵 Content length:', content.length, 'chars');
 
     // Check cache first to reduce IDLE time
-    const cacheKey = getCacheKey(content);
+    const cacheKey = await buildAnalysisCacheKey({
+      analysisType: 'phishing',
+      url,
+      content,
+      options: { title, imageCount: images.length }
+    });
     const cachedResult = getCachedResult(cacheKey);
 
     if (cachedResult) {
@@ -546,7 +568,12 @@ async function handleSentimentAnalysis(data, sendResponse) {
     const { content, url } = data;
     
     // Check cache first
-    const cacheKey = getCacheKey(content);
+    const cacheKey = await buildAnalysisCacheKey({
+      analysisType: 'sentiment',
+      url,
+      content,
+      options: { analyzer: 'basic' }
+    });
     const cachedResult = getCachedResult(cacheKey);
     
     if (cachedResult) {

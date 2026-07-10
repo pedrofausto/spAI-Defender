@@ -3,6 +3,46 @@
  * Manages Chrome Built-in AI Prompt API sessions
  */
 
+function normalizeLanguageModelParams(params = {}) {
+  return {
+    defaultTemperature: typeof params.defaultTemperature === 'number' ? params.defaultTemperature : 0.8,
+    defaultTopK: typeof params.defaultTopK === 'number' ? params.defaultTopK : 40,
+    maxTopK: typeof params.maxTopK === 'number' ? params.maxTopK : 40
+  };
+}
+
+async function getLanguageModelAvailability(options = {}) {
+  if (typeof self === 'undefined' || !self.LanguageModel) return 'no';
+  if (typeof self.LanguageModel.availability === 'function') {
+    return await self.LanguageModel.availability(options);
+  }
+  if (typeof self.LanguageModel.capabilities === 'function') {
+    const capabilities = await self.LanguageModel.capabilities(options);
+    return capabilities?.available || capabilities?.availability || 'no';
+  }
+  return typeof self.LanguageModel.create === 'function' ? 'readily' : 'no';
+}
+
+async function getLanguageModelParams() {
+  if (typeof self === 'undefined' || !self.LanguageModel) {
+    return normalizeLanguageModelParams();
+  }
+  if (typeof self.LanguageModel.params === 'function') {
+    return normalizeLanguageModelParams(await self.LanguageModel.params());
+  }
+  if (typeof self.LanguageModel.capabilities === 'function') {
+    return normalizeLanguageModelParams(await self.LanguageModel.capabilities());
+  }
+  return normalizeLanguageModelParams();
+}
+
+async function getSummarizerAvailability(options = {}) {
+  if (typeof self === 'undefined' || !self.Summarizer) return 'no';
+  if (typeof self.Summarizer.availability === 'function') {
+    return await self.Summarizer.availability(options);
+  }
+  return typeof self.Summarizer.create === 'function' ? 'readily' : 'no';
+}
 export class AISessionManager {
   constructor() {
     this.session = null;
@@ -17,17 +57,14 @@ export class AISessionManager {
 
   /**
    * Check if the AI model is available
-   * Actually checks the Chrome Built-in AI LanguageModel API
    * @returns {Promise<string>} Availability status: 'readily', 'after-download', or 'no'
    */
-  async checkAvailability() {
-    // Return cached result if already checked
+  async checkAvailability(options = {}) {
     if (this.availabilityChecked && this.availability) {
       return this.availability;
     }
 
     try {
-      // Check if LanguageModel API exists
       if (typeof self === 'undefined' || !self.LanguageModel) {
         console.warn('🤖 Chrome Built-in AI: NOT AVAILABLE (LanguageModel API not found)');
         this.availability = 'no';
@@ -36,15 +73,13 @@ export class AISessionManager {
         return 'no';
       }
 
-      // Check actual capabilities with timeout
       const TIMEOUT_MS = 2000;
-      const capabilitiesPromise = self.LanguageModel.capabilities();
+      const availabilityPromise = getLanguageModelAvailability(options);
       const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Capabilities check timeout')), TIMEOUT_MS)
+        setTimeout(() => reject(new Error('Availability check timeout')), TIMEOUT_MS)
       );
 
-      const capabilities = await Promise.race([capabilitiesPromise, timeoutPromise]);
-      this.availability = capabilities?.available || 'no';
+      this.availability = await Promise.race([availabilityPromise, timeoutPromise]);
       this.aiAvailable = this.availability === 'readily' || this.availability === 'after-download';
       this.availabilityChecked = true;
 
@@ -70,33 +105,18 @@ export class AISessionManager {
 
   /**
    * Get AI model capabilities
-   * Actually calls the Chrome Built-in AI API
    * @returns {Promise<Object>} Model capabilities
    */
   async getCapabilities() {
     try {
-      // First check availability
       const availability = await this.checkAvailability();
+      const params = await getLanguageModelParams();
 
-      if (availability === 'no' || !self.LanguageModel) {
-        return {
-          available: false,
-          availability: 'no',
-          defaultTemperature: 0.8,
-          defaultTopK: 40,
-          maxTopK: 40,
-          error: 'Chrome Built-in AI not available'
-        };
-      }
-
-      // Get real capabilities from the API
-      const capabilities = await self.LanguageModel.capabilities();
       return {
-        available: true,
-        availability: capabilities?.available || 'no',
-        defaultTemperature: capabilities?.defaultTemperature || 0.8,
-        defaultTopK: capabilities?.defaultTopK || 40,
-        maxTopK: capabilities?.maxTopK || 40
+        available: availability === 'readily' || availability === 'after-download',
+        availability,
+        ...params,
+        error: availability === 'no' ? 'Chrome Built-in AI not available' : undefined
       };
 
     } catch (error) {
@@ -104,9 +124,7 @@ export class AISessionManager {
       return {
         available: false,
         availability: 'no',
-        defaultTemperature: 0.8,
-        defaultTopK: 40,
-        maxTopK: 40,
+        ...normalizeLanguageModelParams(),
         error: error.message
       };
     }
@@ -262,32 +280,30 @@ export class AISessionManager {
    * @returns {Promise<string>} Summary
    */
   async summarize(text, options = {}) {
-    try {
-      // PRIMARY: Use Summarization API first
-      console.log('📝 Using Summarization API');
+    const summarizerOptions = {
+      type: options.type || 'key-points',
+      format: options.format || 'markdown',
+      length: options.length || 'medium',
+      sharedContext: options.context || ''
+    };
 
-      // Create summarizer with options
-      const summarizerOptions = {
-        type: options.type || 'key-points',
-        format: options.format || 'markdown',
-        length: options.length || 'medium',
-        sharedContext: options.context || ''
-      };
-
-      const summarizer = await self.Summarizer.create(summarizerOptions);
-      const summary = await summarizer.summarize(text, {
-        context: options.context || ''
-      });
-      await summarizer.destroy();
-      return summary;
-    } catch (error) {
-      console.warn('Summarization API failed, using fallback:', error);
-      // FALLBACK: Use Prompt API
-      console.log('📝 Using FALLBACK: Prompt API');
-      return await this.promptSumm(text, options);
+    const availability = await getSummarizerAvailability(summarizerOptions);
+    if (availability === 'readily' || availability === 'after-download') {
+      let summarizer = null;
+      try {
+        console.log('📝 Using Summarization API');
+        summarizer = await self.Summarizer.create(summarizerOptions);
+        return await summarizer.summarize(text, { context: options.context || '' });
+      } catch (error) {
+        console.warn('Summarization API failed, using fallback:', error);
+      } finally {
+        await summarizer?.destroy?.();
+      }
     }
-  }
 
+    console.log('📝 Using FALLBACK: Prompt API');
+    return await this.promptSumm(text, options);
+  }
   /**
    * Fallback: Summarize using prompt (when API not available)
    * @param {string} text - Text to summarize
@@ -322,15 +338,20 @@ export class AISessionManager {
    */
   async getSummarizationCapabilities() {
     try {
-      // Assume summarization is available (NEW API on self.Summarizer)
-      return true;
+      const availability = await getSummarizerAvailability();
+      return {
+        available: availability === 'readily' || availability === 'after-download',
+        availability
+      };
     } catch (error) {
       console.error('Error getting summarization capabilities:', error);
-      // Return true anyway to keep extension functional
-      return true;
+      return {
+        available: false,
+        availability: 'no',
+        error: error.message
+      };
     }
   }
-
   /**
    * Summarize with streaming for real-time results
    * @param {string} text - Text to summarize
@@ -339,45 +360,41 @@ export class AISessionManager {
    * @returns {Promise<string>} Complete summary
    */
   async summarizeStreaming(text, options = {}, onChunk) {
+    const summarizerOptions = {
+      type: options.type || 'key-points',
+      format: options.format || 'markdown',
+      length: options.length || 'medium',
+      sharedContext: options.context || ''
+    };
+
     try {
-      // NEW API: Check if Summarizer exists (directly on self)
-      if (typeof self.Summarizer !== 'undefined') {
-        console.log('📝 Using STREAMING: Summarization API (NEW API)');
+      const availability = await getSummarizerAvailability(summarizerOptions);
+      if (availability === 'readily' || availability === 'after-download') {
+        console.log('📝 Using STREAMING: Summarization API');
+        let summarizer = null;
+        try {
+          summarizer = await self.Summarizer.create(summarizerOptions);
+          let fullSummary = '';
+          const stream = summarizer.summarizeStreaming(text, { context: options.context || '' });
 
-        const summarizerOptions = {
-          type: options.type || 'key-points',
-          format: options.format || 'markdown',
-          length: options.length || 'medium',
-          sharedContext: options.context || ''
-        };
-
-        // NEW API: await self.Summarizer.create()
-        const summarizer = await self.Summarizer.create(summarizerOptions);
-
-        // Use streaming summarization
-        let fullSummary = '';
-        const stream = summarizer.summarizeStreaming(text, {
-          context: options.context || ''
-        });
-
-        for await (const chunk of stream) {
-          fullSummary = chunk;
-          if (onChunk && typeof onChunk === 'function') {
-            onChunk(chunk);
+          for await (const chunk of stream) {
+            fullSummary = chunk;
+            if (onChunk && typeof onChunk === 'function') {
+              onChunk(chunk);
+            }
           }
-        }
 
-        await summarizer.destroy();
-        return fullSummary;
+          return fullSummary;
+        } finally {
+          await summarizer?.destroy?.();
+        }
       }
     } catch (error) {
       console.warn('Streaming summarization failed, using fallback:', error);
     }
 
-    // Fallback to batch summarization
     return await this.summarize(text, options);
   }
-
   /**
    * Send prompt with streaming response
    * @param {string} prompt - The prompt text

@@ -26,7 +26,7 @@ A robust browser extension that reads and analyzes content from web pages using 
 **Current Features:**
 - ✅ **Automatic page analysis** - No clicks required
 - ✅ **Progressive visual alerts** - Faded red outlines (risk > 50) + badge (risk > 75)
-- ✅ **Image analysis with OCR** - Detects phishing in images
+- ⚠️ **Image URL/context analysis** - Reviews image URLs and surrounding page context; OCR and visual image analysis are not implemented yet
 - ✅ **Phishing detection** - AI-powered multi-layer detection
 - ✅ **Sentiment analysis** - Identifies manipulation tactics
 - ✅ **On-device AI processing** - Privacy-first, no data sent
@@ -129,6 +129,11 @@ spAI-Defender/
 - Local storage only
 - Messages analyzed locally without transmission
 
+
+### Image and OCR Scope
+
+The current code does not perform OCR and does not send image pixels to Gemini Nano. Image-related checks are limited to image URLs, filenames, and surrounding page context. OCR and visual analysis are future work unless implemented with a fully local, privacy-preserving dependency.
+
 ### Security Features
 - Manifest V3 compliance
 - Content Security Policy enforced
@@ -170,7 +175,7 @@ cd spAI-Defender/chrome-extension
 - [x] Automatic page analysis
 - [x] Progressive visual alerts (highlights + badge)
 - [x] Threat scoring system
-- [x] Image analysis with OCR
+- [ ] OCR and visual image analysis (future; must remain fully local)
 - [x] Social engineering detection
 
 ### Phase 3 (Completed - ✅)
