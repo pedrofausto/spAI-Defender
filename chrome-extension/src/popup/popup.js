@@ -1,923 +1,511 @@
-/**
- * spAI-Defender Popup Script
- * Handles user interface and interactions
- */
-
-// DOM Elements
-const elements = {
-  statusIcon: document.getElementById('statusIcon'),
-  aiStatus: document.getElementById('aiStatus'),
-  tabTitle: document.getElementById('tabTitle'),
-  tabUrl: document.getElementById('tabUrl'),
-
-  // Dashboard
-  riskScore: document.getElementById('riskScore'),
-  threatsCount: document.getElementById('threatsCount'),
-  pagesCount: document.getElementById('pagesCount'),
-  riskFill: document.getElementById('riskFill'),
-
-  // Action buttons
-  extractBtn: document.getElementById('extractBtn'),
-  summarizeBtn: document.getElementById('summarizeBtn'),
-  analyzeBtn: document.getElementById('analyzeBtn'),
-  customPromptBtn: document.getElementById('customPromptBtn'),
-  phishingScanBtn: document.getElementById('phishingScanBtn'),
-  sentimentBtn: document.getElementById('sentimentBtn'),
-
-  // Prompt section
-  promptSection: document.getElementById('promptSection'),
-  promptInput: document.getElementById('promptInput'),
-  sendPromptBtn: document.getElementById('sendPromptBtn'),
-  cancelPromptBtn: document.getElementById('cancelPromptBtn'),
-
-  // Results section
-  resultsSection: document.getElementById('resultsSection'),
-  resultsContent: document.getElementById('resultsContent'),
-  clearResultsBtn: document.getElementById('clearResultsBtn'),
-
-  // Loading overlay
-  loadingOverlay: document.getElementById('loadingOverlay'),
-
-  // Footer links
-  helpLink: document.getElementById('helpLink'),
-  aboutLink: document.getElementById('aboutLink'),
-
-  // Advanced metrics
-  advancedMetrics: document.getElementById('advancedMetrics'),
-  closeMetricsBtn: document.getElementById('closeMetricsBtn'),
-  valenceFill: document.getElementById('valenceFill'),
-  valenceValue: document.getElementById('valenceValue'),
-  arousalFill: document.getElementById('arousalFill'),
-  arousalValue: document.getElementById('arousalValue'),
-  dominanceFill: document.getElementById('dominanceFill'),
-  dominanceValue: document.getElementById('dominanceValue'),
-  emotionalState: document.getElementById('emotionalState'),
-  lexiconScores: document.getElementById('lexiconScores'),
-  anomaliesList: document.getElementById('anomaliesList'),
-  confidenceScores: document.getElementById('confidenceScores')
+const translations = {
+  en: {
+    currentRisk:'Current risk',confidence:'Confidence',extract:'Extract',risk:'Risk',language:'Language',summary:'Summary',
+    analyses7d:'Analyses · 7d',malicious:'Malicious',inconclusive:'Inconclusive',avgRisk:'Avg. risk',
+    avgLatency:'Avg. latency',trend24h:'24h trend',evidence:'Observed evidence',awaitingEvidence:'Awaiting validated evidence.',
+    contentMetrics:'Content metrics',platform:'Platform',languageDetected:'Language',words:'Words',visibleMessages:'Visible messages',
+    links:'Links',forms:'Forms',executiveSummary:'Executive summary',emotionalProfile:'Emotional profile',urgency:'Urgency',
+    manipulation:'Manipulation',trust:'Trust',history:'Local history',reanalyze:'Reanalyze',extractAgain:'Extract again',
+    customPrompt:'Custom prompt',technicalDetails:'Technical details',cancel:'Cancel',send:'Send',
+    pending:'Pending',running:'Running',done:'Done',failed:'Failed',checking:'Checking',available:'Available',
+    unavailable:'Unavailable',downloading:'Downloading',preparing:'Preparing local analysis',extracting:'Extracting visible content',
+    analyzingRisk:'Analyzing phishing and scam risk',analyzingLanguage:'Analyzing emotional manipulation',
+    summarizing:'Generating local summary',complete:'Local analysis complete',partial:'Analysis completed with partial results',
+    noEvidence:'No validated malicious evidence was observed.',storageUnavailable:'Local metrics unavailable',
+    aiUnavailable:'Gemini Nano is unavailable. Risk remains inconclusive.',noContent:'No analyzable content was extracted.',
+    promptComplete:'Custom analysis completed.',yes:'Yes',no:'No',unknown:'Unknown',historyWindow:'days',localMetadataEvents:'local metadata events',recentChats:'Recent chats',dangerousChats:'Most dangerous chats',noRecentChats:'No recent WhatsApp chats yet.',noDangerousChats:'No dangerous WhatsApp chats yet.',highRisk:'High risk',mediumRisk:'Medium risk',visibleNow:'visible now',statusValid:'Valid',statusInconclusive:'Inconclusive',statusFailed:'Failed',classPhishing:'Phishing',classScam:'Scam',classSocialEngineering:'Social engineering',classSuspicious:'Suspicious',classSafe:'Safe',riskLow:'Low',riskMedium:'Medium',riskMediumHigh:'Medium high',riskHigh:'High',riskCritical:'Critical',platformWhatsApp:'WhatsApp',platformTelegram:'Telegram',platformGmail:'Gmail',platformOutlook:'Outlook',platformWeb:'Web',urgencyHigh:'High',urgencyMedium:'Medium',urgencyLow:'Low',trustLow:'Low',trustMedium:'Medium',trustHigh:'High',loadingCurrentTab:'Loading current tab...',awaitingAnalysis:'Awaiting analysis',localRecommendation:'Content remains local while Gemini Nano evaluates the active tab.',pendingLocalSummary:'Pending local analysis.',moreActions:'More actions',close:'Close',languageEnglish:'English',languagePortuguese:'Portuguese',chatInspector:'Selected chat',historicalPeak:'Historical peak',observations:'Observations',lastUpdated:'Last updated',noChatSelected:'Select a recent or dangerous chat to inspect its local metadata.',activeChat:'Active chat',selectedFromHistory:'Selected from local history',currentRiskHigh:'High',currentRiskMedium:'Medium',currentRiskLow:'Low'
+  },
+  'pt-BR': {
+    currentRisk:'Risco atual',confidence:'Confiança',extract:'Extração',risk:'Risco',language:'Linguagem',summary:'Resumo',
+    analyses7d:'Análises · 7d',malicious:'Maliciosos',inconclusive:'Inconclusivos',avgRisk:'Risco médio',
+    avgLatency:'Latência média',trend24h:'Tendência 24h',evidence:'Evidências observadas',awaitingEvidence:'Aguardando evidências validadas.',
+    contentMetrics:'Métricas do conteúdo',platform:'Plataforma',languageDetected:'Idioma',words:'Palavras',visibleMessages:'Mensagens visíveis',
+    links:'Links',forms:'Formulários',executiveSummary:'Resumo executivo',emotionalProfile:'Perfil emocional',urgency:'Urgência',
+    manipulation:'Manipulação',trust:'Confiança',history:'Histórico local',reanalyze:'Reanalisar',extractAgain:'Extrair novamente',
+    customPrompt:'Prompt personalizado',technicalDetails:'Detalhes técnicos',cancel:'Cancelar',send:'Enviar',
+    pending:'Pendente',running:'Executando',done:'Concluído',failed:'Falhou',checking:'Verificando',available:'Disponível',
+    unavailable:'Indisponível',downloading:'Baixando',preparing:'Preparando análise local',extracting:'Extraindo conteúdo visível',
+    analyzingRisk:'Analisando risco de phishing e golpe',analyzingLanguage:'Analisando manipulação emocional',
+    summarizing:'Gerando resumo local',complete:'Análise local concluída',partial:'Análise concluída com resultados parciais',
+    noEvidence:'Nenhuma evidência maliciosa validada foi observada.',storageUnavailable:'Métricas locais indisponíveis',
+    aiUnavailable:'Gemini Nano indisponível. O risco permanece inconclusivo.',noContent:'Nenhum conteúdo analisável foi extraído.',
+    promptComplete:'Análise personalizada concluída.',yes:'Sim',no:'Não',unknown:'Desconhecido',historyWindow:'dias',localMetadataEvents:'eventos locais de metadados',recentChats:'Chats recentes',dangerousChats:'Chats mais perigosos',noRecentChats:'Nenhum chat recente do WhatsApp ainda.',noDangerousChats:'Nenhum chat perigoso do WhatsApp ainda.',highRisk:'Alto risco',mediumRisk:'Risco médio',visibleNow:'visíveis agora',statusValid:'Válido',statusInconclusive:'Inconclusivo',statusFailed:'Falha',classPhishing:'Phishing',classScam:'Golpe',classSocialEngineering:'Engenharia social',classSuspicious:'Suspeito',classSafe:'Seguro',riskLow:'Baixo',riskMedium:'Médio',riskMediumHigh:'Médio-alto',riskHigh:'Alto',riskCritical:'Crítico',platformWhatsApp:'WhatsApp',platformTelegram:'Telegram',platformGmail:'Gmail',platformOutlook:'Outlook',platformWeb:'Web',urgencyHigh:'Alta',urgencyMedium:'Média',urgencyLow:'Baixa',trustLow:'Baixa',trustMedium:'Média',trustHigh:'Alta',loadingCurrentTab:'Carregando aba atual...',awaitingAnalysis:'Aguardando análise',localRecommendation:'O conteúdo permanece local enquanto o Gemini Nano avalia a aba ativa.',pendingLocalSummary:'Análise local pendente.',moreActions:'Mais ações',close:'Fechar',languageEnglish:'Inglês',languagePortuguese:'Português',chatInspector:'Chat selecionado',historicalPeak:'Pico histórico',observations:'Ocorrências',lastUpdated:'Última atualização',noChatSelected:'Selecione um chat recente ou perigoso para inspecionar os metadados locais.',activeChat:'Chat ativo',selectedFromHistory:'Selecionado do histórico local',currentRiskHigh:'Alto',currentRiskMedium:'Médio',currentRiskLow:'Baixo'
+  }
 };
 
-// State
+const locale = String(navigator.language || 'en').toLowerCase().startsWith('pt') ? 'pt-BR' : 'en';
+const t = key => translations[locale][key] || translations.en[key] || key;
+const byId = id => document.getElementById(id);
+const el = {
+  aiChip:byId('aiChip'), statusIcon:byId('statusIcon'), aiStatus:byId('aiStatus'), tabContext:byId('tabContext'),
+  progressLabel:byId('progressLabel'), progressValue:byId('progressValue'), progressFill:byId('progressFill'),
+  riskPanel:byId('riskPanel'), riskScore:byId('riskScore'), riskLevel:byId('riskLevel'), classification:byId('classification'),
+  analysisStatus:byId('analysisStatus'), recommendation:byId('recommendation'), confidenceFill:byId('confidenceFill'),
+  confidenceValue:byId('confidenceValue'), evidenceCount:byId('evidenceCount'), signalChips:byId('signalChips'),
+  evidenceList:byId('evidenceList'), summaryContent:byId('summaryContent'), notice:byId('notice'),
+  contentPlatform:byId('contentPlatform'), contentLanguage:byId('contentLanguage'), contentWords:byId('contentWords'),
+  contentMessages:byId('contentMessages'), contentLinks:byId('contentLinks'), contentForms:byId('contentForms'),
+  valenceValue:byId('valenceValue'), arousalValue:byId('arousalValue'), dominanceValue:byId('dominanceValue'),
+  urgencyValue:byId('urgencyValue'), manipulationValue:byId('manipulationValue'), trustValue:byId('trustValue'),
+  metricAnalyses:byId('metricAnalyses'), metricMalicious:byId('metricMalicious'),
+  metricInconclusive:byId('metricInconclusive'), metricAvgRisk:byId('metricAvgRisk'),
+  metricLatency:byId('metricLatency'), metricTrend:byId('metricTrend'), riskDistribution:byId('riskDistribution'),
+  historyStatus:byId('historyStatus'), chatHistoryList:byId('chatHistoryList'), dangerousChatList:byId('dangerousChatList'), chatInspector:byId('chatInspector'), chatInspectorTitle:byId('chatInspectorTitle'), chatInspectorStatus:byId('chatInspectorStatus'), chatInspectorCurrentRisk:byId('chatInspectorCurrentRisk'), chatInspectorHistoricalRisk:byId('chatInspectorHistoricalRisk'), chatInspectorVisibleMessages:byId('chatInspectorVisibleMessages'), chatInspectorLinks:byId('chatInspectorLinks'), chatInspectorObservations:byId('chatInspectorObservations'), chatInspectorUpdatedAt:byId('chatInspectorUpdatedAt'), reanalyzeBtn:byId('reanalyzeBtn'), moreBtn:byId('moreBtn'), moreMenu:byId('moreMenu'),
+  extractBtn:byId('extractBtn'), customPromptBtn:byId('customPromptBtn'), technicalBtn:byId('technicalBtn'),
+  promptSection:byId('promptSection'), promptInput:byId('promptInput'), sendPromptBtn:byId('sendPromptBtn'),
+  cancelPromptBtn:byId('cancelPromptBtn'), technicalSection:byId('technicalSection'),
+  technicalContent:byId('technicalContent'), closeTechnicalBtn:byId('closeTechnicalBtn')
+};
+
 let currentTab = null;
+let currentPlatform = 'UNKNOWN';
 let extractedContent = null;
+let currentAnalysis = null;
+let currentSentiment = null;
+let currentSummary = '';
+let threatStats = null;
+let recentChats = [];
+let dangerousChats = [];
+let currentChatSnapshot = null;
 let aiAvailable = false;
-let currentPlatform = 'GENERIC';
-let threatStats = { total: 0, today: 0, recent: [], byRiskLevel: {} };
+let selectedHistoryChatKey = null;
+let running = false;
 
-/**
- * Initialize popup
- */
-async function init() {
-  console.log('Popup initialized');
-
-  // Load current tab info
-  await loadCurrentTab();
-
-  // Check AI availability
-  await checkAIAvailability();
-
-  // Load threat stats
-  await loadThreatStats();
-
-  // Detect platform
-  detectCurrentPlatform();
-
-  // Setup event listeners
-  setupEventListeners();
-  
-  // Auto-extract content when popup opens
-  await autoExtractContent();
+function setText(node, value) { if (node) node.textContent = value == null ? '' : String(value); }
+function applyTranslations() {
+  document.documentElement.lang = locale;
+  document.querySelectorAll('[data-i18n]').forEach(node => setText(node, t(node.dataset.i18n)));
+  setText(el.progressLabel, t('preparing'));
+  setText(el.aiStatus, t('checking'));
+  setText(el.tabContext, t('loadingCurrentTab'));
+  setText(el.classification, t('awaitingAnalysis'));
+  setText(el.recommendation, t('localRecommendation'));
+  setText(el.summaryContent, t('pendingLocalSummary'));
+  ['stepExtract','stepRisk','stepSentiment','stepSummary'].forEach(id => setText(byId(id)?.querySelector('small'), t('pending')));
+  el.moreBtn?.setAttribute('aria-label', t('moreActions'));
+  el.closeTechnicalBtn?.setAttribute('aria-label', t('close'));
 }
-
-/**
- * Auto-extract content when popup opens
- */
-async function autoExtractContent() {
-  if (!currentTab) return;
-  
-  console.log('Auto-extracting content for:', currentTab.url);
-  
-  try {
-    // For WhatsApp, try to get the latest snapshot first
-    if (currentTab.url && currentTab.url.includes('web.whatsapp.com')) {
-      console.log('📸 Attempting to load WhatsApp snapshot...');
-      
-      const snapshotResponse = await sendMessage({
-        type: 'GET_LAST_WHATSAPP_SNAPSHOT'
-      });
-
-      if (snapshotResponse.success && snapshotResponse.snapshot) {
-        const snapshot = snapshotResponse.snapshot;
-        
-        // Verify snapshot is from the current tab
-        if (snapshot.tabId === currentTab.id) {
-          extractedContent = snapshot.content;
-          console.log(`✅ WhatsApp snapshot loaded (${snapshot.chatName}, trigger: ${snapshot.trigger})`);
-          return; // Use snapshot, skip GET_TAB_CONTENT
-        } else {
-          console.log('⚠️ Snapshot is from a different tab, falling back to GET_TAB_CONTENT');
-        }
-      }
-    }
-
-    // Fallback: standard extraction
-    const response = await sendMessage({
-      type: 'GET_TAB_CONTENT',
-      tabId: currentTab.id
-    });
-
-    if (response.success) {
-      extractedContent = response.content;
-      console.log('✅ Content auto-extracted');
-      // Don't show results automatically, just enable buttons
-    }
-  } catch (error) {
-    console.error('Auto-extract failed:', error);
-  }
-}
-
-/**
- * Load current tab information
- */
-async function loadCurrentTab() {
-  try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    currentTab = tab;
-
-    if (tab) {
-      safeSetText(elements.tabTitle, tab.title || 'Untitled');
-      safeSetText(elements.tabUrl, tab.url || '-');
-    }
-  } catch (error) {
-    console.error('Error loading current tab:', error);
-    safeSetText(elements.tabTitle, 'Error loading tab');
-  }
-}
-
-/**
- * Check AI model availability
- */
-async function checkAIAvailability() {
-  try {
-    const response = await sendMessage({ type: 'CHECK_AI_AVAILABILITY' });
-
-    if (response.success) {
-      const { availability, hasSummarizationAPI } = response;
-      updateAIStatus(availability);
-      aiAvailable = availability === 'readily';
-
-      // Log if using optimized Summarization API
-      if (hasSummarizationAPI) {
-        console.log('✅ Using Optimized Summarization API');
-      } else {
-        console.log('⚠️ Using Fallback Prompt API for Summarization');
-      }
-
-      // Enable AI-dependent buttons
-      if (aiAvailable) {
-        elements.summarizeBtn.disabled = false;
-        elements.analyzeBtn.disabled = false;
-        elements.customPromptBtn.disabled = false;
-        elements.phishingScanBtn.disabled = false;
-        elements.sentimentBtn.disabled = false;
-      }
-    } else {
-      updateAIStatus('unavailable');
-      showError('Failed to check AI availability');
-    }
-  } catch (error) {
-    console.error('Error checking AI availability:', error);
-    updateAIStatus('error');
-  }
-}
-
-/**
- * Escape HTML to prevent XSS
- */
-function escapeHTML(str) {
-  if (typeof str !== 'string') return '';
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
-}
-
-/**
- * Safely set text content
- */
-function safeSetText(element, text) {
-  if (element) {
-    element.textContent = text || '';
-  }
-}
-
-/**
- * Update AI status display
- */
-function updateAIStatus(status) {
-  if (!elements.aiStatus || !elements.statusIcon) return;
-
-  elements.aiStatus.textContent = status;
-  elements.aiStatus.className = `status-value ${status}`;
-
-  switch (status) {
-    case 'readily':
-      elements.statusIcon.textContent = '✅';
-      elements.aiStatus.textContent = 'Available';
-      break;
-    case 'after-download':
-      elements.statusIcon.textContent = '⬇️';
-      elements.aiStatus.textContent = 'Download Required';
-      break;
-    case 'no':
-    case 'unavailable':
-      elements.statusIcon.textContent = '❌';
-      elements.aiStatus.textContent = 'Unavailable';
-      break;
-    case 'error':
-      elements.statusIcon.textContent = '⚠️';
-      elements.aiStatus.textContent = 'Error';
-      break;
-    default:
-      elements.statusIcon.textContent = '⚙️';
-      elements.aiStatus.textContent = status;
-  }
-}
-
-/**
- * Setup event listeners
- */
-function setupEventListeners() {
-  // Action buttons
-  elements.extractBtn.addEventListener('click', handleExtractContent);
-  elements.summarizeBtn.addEventListener('click', handleSummarizeContent);
-  elements.analyzeBtn.addEventListener('click', handleAnalyzeContent);
-  elements.customPromptBtn.addEventListener('click', showCustomPrompt);
-  elements.phishingScanBtn.addEventListener('click', handlePhishingScan);
-  elements.sentimentBtn.addEventListener('click', handleSentimentAnalysis);
-
-  // Prompt actions
-  elements.sendPromptBtn.addEventListener('click', handleCustomPrompt);
-  elements.cancelPromptBtn.addEventListener('click', hideCustomPrompt);
-
-  // Results actions
-  elements.clearResultsBtn.addEventListener('click', clearResults);
-
-  // Footer links
-  elements.helpLink.addEventListener('click', (e) => {
-    e.preventDefault();
-    showHelp();
-  });
-
-  elements.aboutLink.addEventListener('click', (e) => {
-    e.preventDefault();
-    showAbout();
-  });
-
-  // Advanced metrics close button
-  elements.closeMetricsBtn.addEventListener('click', () => {
-    elements.advancedMetrics.style.display = 'none';
-  });
-}
-
-/**
- * Handle extract content button click
- */
-async function handleExtractContent() {
-  showLoading();
-
-  try {
-    const response = await sendMessage({
-      type: 'GET_TAB_CONTENT',
-      tabId: currentTab.id
-    });
-
-    if (response.success) {
-      extractedContent = response.content;
-      showResults('Content Extracted', formatExtractedContent(extractedContent));
-    } else {
-      showError(response.error || 'Failed to extract content');
-    }
-  } catch (error) {
-    console.error('Error extracting content:', error);
-    showError('Failed to extract content');
-  } finally {
-    hideLoading();
-  }
-}
-
-/**
- * Handle summarize content button click
- */
-async function handleSummarizeContent() {
-  if (!extractedContent) {
-    showError('Please extract content first');
-    return;
-  }
-
-  showLoading();
-
-  try {
-    const response = await sendMessage({
-      type: 'SUMMARIZE_CONTENT',
-      data: {
-        content: extractedContent.bodyText, // Use bodyText for better summaries
-        maxLength: 150
-      }
-    });
-
-    if (response.success) {
-      showResults('Summary', response.summary);
-    } else {
-      showError(response.error || 'Failed to summarize content');
-    }
-  } catch (error) {
-    console.error('Error summarizing content:', error);
-    showError('Failed to summarize content');
-  } finally {
-    hideLoading();
-  }
-}
-
-/**
- * Handle analyze content button click
- */
-async function handleAnalyzeContent() {
-  if (!extractedContent) {
-    showError('Please extract content first');
-    return;
-  }
-
-  showLoading();
-
-  try {
-    const analysisPrompt = `Analyze this web page and provide:
-1. Main topic and purpose
-2. Key points (3-5 bullet points)
-3. Target audience
-4. Content quality assessment
-
-Page Title: ${extractedContent.title}
-Content: ${extractedContent.bodyText.substring(0, 3000)}...`;
-
-    const response = await sendMessage({
-      type: 'ANALYZE_TAB_CONTENT',
-      data: {
-        content: extractedContent.bodyText,
-        prompt: analysisPrompt
-      }
-    });
-
-    if (response.success) {
-      showResults('Content Analysis', response.analysis);
-    } else {
-      showError(response.error || 'Failed to analyze content');
-    }
-  } catch (error) {
-    console.error('Error analyzing content:', error);
-    showError('Failed to analyze content');
-  } finally {
-    hideLoading();
-  }
-}
-
-/**
- * Show custom prompt section
- */
-function showCustomPrompt() {
-  if (!extractedContent) {
-    showError('Please extract content first');
-    return;
-  }
-
-  elements.promptSection.style.display = 'block';
-  elements.promptInput.focus();
-}
-
-/**
- * Hide custom prompt section
- */
-function hideCustomPrompt() {
-  elements.promptSection.style.display = 'none';
-  elements.promptInput.value = '';
-}
-
-/**
- * Handle custom prompt submission
- */
-async function handleCustomPrompt() {
-  const customPrompt = elements.promptInput.value.trim();
-
-  if (!customPrompt) {
-    showError('Please enter a prompt');
-    return;
-  }
-
-  if (!extractedContent) {
-    showError('Please extract content first');
-    return;
-  }
-
-  hideCustomPrompt();
-  showLoading();
-
-  try {
-    const fullPrompt = `${customPrompt}\n\nContext from current page:\nTitle: ${extractedContent.title}\nContent: ${extractedContent.bodyText.substring(0, 3000)}...`;
-
-    const response = await sendMessage({
-      type: 'ANALYZE_TAB_CONTENT',
-      data: {
-        content: extractedContent.bodyText,
-        prompt: fullPrompt
-      }
-    });
-
-    if (response.success) {
-      showResults('Custom Prompt Response', response.analysis);
-    } else {
-      showError(response.error || 'Failed to process prompt');
-    }
-  } catch (error) {
-    console.error('Error processing custom prompt:', error);
-    showError('Failed to process prompt');
-  } finally {
-    hideLoading();
-  }
-}
-
-/**
- * Format extracted content for display
- */
-function formatExtractedContent(content) {
-  const stats = content.stats || {};
-  const meta = content.meta || {};
-
-  return `
-<strong>Page Information:</strong>
-• Title: ${content.title}
-• URL: ${content.url}
-• Word Count: ${stats.wordCount || 'N/A'}
-• Reading Time: ~${stats.readingTime || 'N/A'} minutes
-
-<strong>Structure:</strong>
-• Headings: ${stats.headingCount || 0}
-• Paragraphs: ${stats.paragraphCount || 0}
-• Links: ${stats.linkCount || 0}
-• Images: ${stats.imageCount || 0}
-
-<strong>Metadata:</strong>
-• Description: ${meta.description || 'N/A'}
-• Language: ${meta.lang || 'N/A'}
-
-Content extracted successfully! You can now use the Summarize or Analyze buttons.
-  `.trim();
-}
-
-/**
- * Show results section without rendering untrusted HTML.
- */
-function showResults(title, content) {
-  if (!elements.resultsContent || !elements.resultsSection) return;
-
-  const heading = document.createElement('h3');
-  heading.textContent = title || '';
-
-  const body = document.createElement('div');
-  body.className = 'results-text';
-  body.textContent = content || '';
-
-  elements.resultsContent.replaceChildren(heading, body);
-  elements.resultsSection.style.display = 'block';
-}
-
-/**
- * Clear results
- */
-function clearResults() {
-  elements.resultsContent.replaceChildren();
-  elements.resultsSection.style.display = 'none';
-}
-
-/**
- * Show error message
- */
-function showError(message) {
-  showResults('Error', message || 'Unknown error');
-}
-
-/**
- * Show loading overlay
- */
-function showLoading() {
-  elements.loadingOverlay.style.display = 'flex';
-}
-
-/**
- * Hide loading overlay
- */
-function hideLoading() {
-  elements.loadingOverlay.style.display = 'none';
-}
-
-/**
- * Send message to background script
- */
 function sendMessage(message) {
   return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage(message, (response) => {
-      if (chrome.runtime.lastError) {
-        reject(chrome.runtime.lastError);
-      } else {
-        resolve(response);
-      }
+    chrome.runtime.sendMessage(message, response => {
+      if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+      else resolve(response || { success:false, error:'Empty response' });
     });
   });
 }
-
-/**
- * Show help information
- */
-function showHelp() {
-  const helpText = `
-<strong>How to Use spAI-Defender:</strong>
-
-1. <strong>Extract Content:</strong> Click to extract all content from the current tab
-2. <strong>Summarize Page:</strong> Get an AI-generated summary of the page content
-3. <strong>Analyze Content:</strong> Get detailed AI analysis of the page
-4. <strong>Custom Prompt:</strong> Ask custom questions about the page content
-
-<strong>Requirements:</strong>
-• Chrome 138 or later
-• Built-in AI feature enabled
-• Sufficient system resources (see documentation)
-
-<strong>Note:</strong> The AI model must be downloaded on first use (requires user interaction).
-  `.trim();
-
-  showResults('Help', helpText);
+function setProgress(percent, label) {
+  const value = Math.max(0, Math.min(100, percent));
+  el.progressFill.style.width = value + '%';
+  setText(el.progressValue, value + '%');
+  setText(el.progressLabel, label);
 }
-
-/**
- * Show about information
- */
-function showAbout() {
-  const aboutText = `
-<strong>spAI-Defender Tab Reader</strong>
-Version 1.0.0
-
-A Chrome extension powered by Chrome's Built-in AI (Gemini Nano) to read, analyze, and summarize web page content.
-
-<strong>Features:</strong>
-• Extract content from web pages
-• AI-powered summarization
-• Content analysis
-• Custom prompts for specific queries
-
-<strong>Privacy:</strong>
-All processing happens locally on your device using Chrome's Built-in AI. No data is sent to external servers.
-
-<strong>Technology:</strong>
-Built with Chrome's Prompt API and Manifest V3
-
-<strong>License:</strong> MIT
-  `.trim();
-
-  showResults('About', aboutText);
+function setStep(id, state, detail) {
+  const node = byId(id);
+  node.dataset.state = state;
+  setText(node.querySelector('small'), detail || t(state));
 }
-
-/**
- * Display advanced metrics
- */
-function displayAdvancedMetrics(analysis) {
-  // Show metrics section
-  elements.advancedMetrics.style.display = 'block';
-
-  // Update VAD Profile
-  const sentimentDetails = analysis.details?.sentiment;
-  if (sentimentDetails) {
-    // Valence (range: -1 to +1, display 0-100%)
-    const valence = sentimentDetails.valence ?? 0;
-    const valencePercent = ((valence + 1) / 2) * 100;
-    elements.valenceFill.style.width = `${Math.max(0, Math.min(100, valencePercent))}%`;
-    elements.valenceValue.textContent = valence.toFixed(2);
-
-    // Arousal (0 to 1, display as percentage)
-    const arousal = sentimentDetails.arousal ?? 0;
-    elements.arousalFill.style.width = `${Math.max(0, Math.min(100, arousal * 100))}%`;
-    elements.arousalValue.textContent = arousal.toFixed(2);
-
-    // Dominance (0 to 1, display as percentage)
-    const dominance = sentimentDetails.dominance ?? 0;
-    elements.dominanceFill.style.width = `${Math.max(0, Math.min(100, dominance * 100))}%`;
-    elements.dominanceValue.textContent = dominance.toFixed(2);
-
-    // Emotional state
-    elements.emotionalState.textContent = `Emotional State: ${sentimentDetails.emotionalState || 'N/A'}`;
-  }
-
-  // Update lexicon scores
-  const dominantLexicons = analysis.originalAnalysis?.sentiment?.dominantLexicons;
-  if (dominantLexicons && dominantLexicons.length > 0) {
-    const explanations = {
-      urgency: 'Uses time pressure',
-      authority: 'Claims authority',
-      fear: 'Creates fear',
-      reward: 'Offers rewards',
-      action: 'Demands action',
-      credential: 'Requests credentials',
-      trust: 'False trust markers'
-    };
-    elements.lexiconScores.replaceChildren(...dominantLexicons.map(lex => {
-      const tag = document.createElement('span');
-      tag.className = 'lexicon-tag';
-      tag.textContent = explanations[lex] || lex;
-      return tag;
-    }));
-  } else {
-    const tag = document.createElement('span');
-    tag.className = 'lexicon-tag';
-    tag.textContent = 'None detected';
-    elements.lexiconScores.replaceChildren(tag);
-  }
-
-  // Update linguistic anomalies
-  const linguisticAnomalies = analysis.originalAnalysis?.sentiment?.linguisticFeatures?.anomalies;
-  if (linguisticAnomalies && linguisticAnomalies.length > 0) {
-    elements.anomaliesList.replaceChildren(...linguisticAnomalies.map(anomaly => {
-      const item = document.createElement('div');
-      item.className = 'anomaly-item';
-      item.textContent = anomaly;
-      return item;
-    }));
-  } else {
-    const item = document.createElement('div');
-    item.className = 'anomaly-item';
-    item.textContent = 'No anomalies found';
-    elements.anomaliesList.replaceChildren(item);
-  }
-
-  // Update confidence breakdown
-  if (analysis.breakdown) {
-    const breakdown = analysis.breakdown;
-    const labels = [
-      ['sentiment', 'Sentiment'],
-      ['phishing', 'Phishing'],
-      ['image', 'Image'],
-      ['linguistic', 'Linguistic']
-    ];
-    const items = labels.map(([key, label]) => {
-      const value = Math.max(0, Math.min(100, Number(breakdown[key]) || 0));
-      const item = document.createElement('div');
-      item.className = 'confidence-item';
-
-      const labelNode = document.createElement('span');
-      labelNode.className = 'confidence-label';
-      labelNode.textContent = label;
-
-      const bar = document.createElement('div');
-      bar.className = 'confidence-bar';
-      const fill = document.createElement('div');
-      fill.className = 'confidence-fill';
-      fill.style.width = `${value}%`;
-      bar.appendChild(fill);
-
-      const valueNode = document.createElement('span');
-      valueNode.className = 'confidence-value';
-      valueNode.textContent = `${value}%`;
-
-      item.append(labelNode, bar, valueNode);
-      return item;
-    });
-    elements.confidenceScores.replaceChildren(...items);
+function resetPipeline() {
+  ['stepExtract','stepRisk','stepSentiment','stepSummary'].forEach(id => setStep(id, 'pending', t('pending')));
+  setProgress(0, t('preparing'));
+}
+function showNotice(message) {
+  setText(el.notice, message);
+  el.notice.hidden = !message;
+}
+function formatLatency(ms) {
+  const value = Number(ms);
+  if (!Number.isFinite(value)) return '--';
+  return value < 1000 ? Math.round(value) + ' ms' : (value / 1000).toFixed(1) + ' s';
+}
+function localizeRiskLevel(level) {
+  switch (String(level || '').toUpperCase()) {
+    case 'LOW': return t('riskLow');
+    case 'MEDIUM': return t('riskMedium');
+    case 'MEDIUM_HIGH': return t('riskMediumHigh');
+    case 'HIGH': return t('riskHigh');
+    case 'CRITICAL': return t('riskCritical');
+    default: return String(level || t('unknown'));
   }
 }
-
-/**
- * Load threat statistics
- */
+function localizeClassification(value) {
+  switch (String(value || '').toUpperCase()) {
+    case 'PHISHING': return t('classPhishing');
+    case 'SCAM': return t('classScam');
+    case 'SOCIAL_ENGINEERING': return t('classSocialEngineering');
+    case 'SUSPICIOUS': return t('classSuspicious');
+    case 'SAFE': return t('classSafe');
+    case 'INCONCLUSIVE': return t('statusInconclusive');
+    default: return String(value || t('unknown'));
+  }
+}
+function localizeStatus(value) {
+  switch (String(value || '').toUpperCase()) {
+    case 'VALID': return t('statusValid');
+    case 'INCONCLUSIVE': return t('statusInconclusive');
+    case 'FAILED': return t('statusFailed');
+    default: return String(value || t('unknown'));
+  }
+}
+function localizePlatform(value) {
+  switch (String(value || '').toUpperCase()) {
+    case 'WHATSAPP': return t('platformWhatsApp');
+    case 'TELEGRAM': return t('platformTelegram');
+    case 'GMAIL': return t('platformGmail');
+    case 'OUTLOOK': return t('platformOutlook');
+    case 'WEB': return t('platformWeb');
+    case 'GENERIC': return t('platformWeb');
+    default: return String(value || t('unknown'));
+  }
+}
+function localizeSignal(value) {
+  return String(value || '')
+    .split(/[\_\s]+/)
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(' ');
+}
+function localizeLanguageCode(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized || normalized === 'unknown') return t('unknown');
+  if (normalized.startsWith('pt')) return t('languagePortuguese');
+  if (normalized.startsWith('en')) return t('languageEnglish');
+  return String(value);
+}
+function isWhatsAppCurrentTab() {
+  return currentPlatform === 'WHATSAPP' || Boolean((currentTab?.url || '').includes('web.whatsapp.com'));
+}
+async function requestWhatsAppVisibleReanalysis() {
+  if (!currentTab?.id || !isWhatsAppCurrentTab()) return;
+  try {
+    await sendMessage({ type:'FORCE_WHATSAPP_REANALYSIS', tabId:currentTab.id });
+    await new Promise(resolve => setTimeout(resolve, 120));
+  } catch {}
+}
+function statusFromAvailability(status) {
+  if (['readily','available'].includes(status)) return 'available';
+  if (['downloading','downloadable','after-download'].includes(status)) return 'downloading';
+  return status === 'error' ? 'error' : 'unavailable';
+}
+async function loadCurrentTab() {
+  const [tab] = await chrome.tabs.query({ active:true, currentWindow:true });
+  currentTab = tab || null;
+  setText(el.tabContext, tab ? (tab.title || tab.url || 'Untitled') : t('unknown'));
+}
+async function checkAIAvailability() {
+  try {
+    const response = await sendMessage({ type:'CHECK_AI_AVAILABILITY' });
+    const availability = response.success ? response.availability : 'unavailable';
+    const state = statusFromAvailability(availability);
+    el.aiChip.dataset.state = state;
+    aiAvailable = ['available','downloading'].includes(state);
+    setText(el.aiStatus, state === 'available' ? t('available') : state === 'downloading' ? t('downloading') : t('unavailable'));
+  } catch {
+    el.aiChip.dataset.state = 'error';
+    setText(el.aiStatus, t('unavailable'));
+    aiAvailable = false;
+  }
+}
+async function detectPlatform() {
+  if (!currentTab) return;
+  try {
+    const response = await sendMessage({ type:'GET_PLATFORM_INFO', url:currentTab.url || '' });
+    if (response.success) currentPlatform = String(response.platform || 'UNKNOWN').toUpperCase();
+  } catch { currentPlatform = 'UNKNOWN'; }
+  setText(el.contentPlatform, localizePlatform(currentPlatform));
+}
 async function loadThreatStats() {
   try {
-    const response = await sendMessage({ type: 'GET_THREAT_STATS' });
-    if (response.success) {
-      threatStats = response.stats;
-      updateDashboard();
-    }
-  } catch (error) {
-    console.error('Error loading threat stats:', error);
+    const [statsResponse, chatResponse] = await Promise.all([
+      sendMessage({ type:'GET_THREAT_STATS' }).catch(() => ({ success:false })),
+      sendMessage({ type:'GET_WHATSAPP_CHAT_HISTORY' }).catch(() => ({ success:false, chats:[] }))
+    ]);
+    threatStats = statsResponse.success ? statsResponse.stats : null;
+    recentChats = chatResponse.success ? (chatResponse.recentChats || chatResponse.chats || []) : [];
+    dangerousChats = chatResponse.success ? (chatResponse.dangerousChats || []) : [];
+  } catch {
+    threatStats = null;
+    recentChats = [];
+    dangerousChats = [];
+  }
+  renderHistory();
+}
+function findActiveChatHistoryEntry() {
+  if (!currentChatSnapshot || !currentTab) return null;
+  const candidates = [...recentChats, ...dangerousChats];
+  return candidates.find(chat =>
+    (currentChatSnapshot.chatId && chat.chatId === currentChatSnapshot.chatId) ||
+    (chat.tabId === currentTab.id && chat.chatName === currentChatSnapshot.chatName)
+  ) || null;
+}
+function getChatHistoryEntryKey(chat = {}) {
+  return [
+    String(chat.tabId || ''),
+    String(chat.chatId || ''),
+    String(chat.chatName || '')
+  ].join('::');
+}
+function getAllHistoryCandidates() {
+  return [...recentChats, ...dangerousChats];
+}
+function getSelectedHistoryEntry() {
+  if (!selectedHistoryChatKey) return null;
+  return getAllHistoryCandidates().find(chat => getChatHistoryEntryKey(chat) === selectedHistoryChatKey) || null;
+}
+function localizeChatSeverity(value) {
+  switch (String(value || '').toUpperCase()) {
+    case 'CRITICAL': return t('riskCritical');
+    case 'HIGH': return t('currentRiskHigh');
+    case 'MEDIUM_HIGH': return t('riskMediumHigh');
+    case 'MEDIUM': return t('currentRiskMedium');
+    case 'LOW': return t('currentRiskLow');
+    default: return localizeRiskLevel(value);
   }
 }
-
-/**
- * Update dashboard with current stats
- */
-function updateDashboard() {
-  if (!elements.threatsCount || !elements.pagesCount || !elements.riskScore || !elements.riskFill) {
-    console.warn('Dashboard elements not found');
-    return;
+function formatLocalTimestamp(value) {
+  if (!value) return '--';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '--';
+  try {
+    return new Intl.DateTimeFormat(locale, {
+      dateStyle: 'short',
+      timeStyle: 'short'
+    }).format(date);
+  } catch {
+    return date.toISOString();
   }
-
-  safeSetText(elements.threatsCount, threatStats.today || 0);
-  safeSetText(elements.pagesCount, threatStats.total || 0);
-
-  // Update risk level based on recent threats
-  const recentHighRisk = (threatStats.recent || []).filter(t =>
-    ['HIGH', 'CRITICAL'].includes(t.riskLevel)
-  ).length;
-
-  if (recentHighRisk > 0) {
-    elements.riskScore.textContent = 'HIGH';
-    elements.riskFill.className = 'risk-fill high';
-  } else if (threatStats.total > 0) {
-    elements.riskScore.textContent = 'MEDIUM';
-    elements.riskFill.className = 'risk-fill medium';
+}function buildChatHistoryRows(chats = []) {
+  return chats.slice(0, 10).map(chat => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.dataset.chatKey = getChatHistoryEntryKey(chat);
+    const severity = String(chat.historicalSeverity || chat.severity || 'low').toLowerCase();
+    item.className = 'chat-history-item';
+    item.dataset.severity = severity;
+    if (item.dataset.chatKey === selectedHistoryChatKey) item.classList.add('is-selected');
+    const title = document.createElement('strong');
+    title.textContent = chat.chatName || t('unknown');
+    const meta = document.createElement('span');
+    const severityLabel = severity === 'high'
+      ? t('highRisk')
+      : severity === 'medium'
+        ? t('mediumRisk')
+        : localizeRiskLevel(severity);
+    const score = Number(chat.historicalMaxRiskScore ?? chat.maxRiskScore ?? 0);
+    meta.textContent = `${severityLabel} · ${score} · ${Number(chat.visibleMessages || 0)} ${t('visibleNow')}`;
+    item.append(title, meta);
+    item.addEventListener('click', () => {
+      selectedHistoryChatKey = item.dataset.chatKey;
+      renderChatHistory();
+    });
+    return item;
+  });
+}
+function renderChatHistory() {
+  if (!el.chatHistoryList || !el.dangerousChatList) return;
+  const activeEntry = findActiveChatHistoryEntry();
+  if (!selectedHistoryChatKey && activeEntry) {
+    selectedHistoryChatKey = getChatHistoryEntryKey(activeEntry);
+  }
+  if (selectedHistoryChatKey && !getAllHistoryCandidates().some(chat => getChatHistoryEntryKey(chat) === selectedHistoryChatKey)) {
+    selectedHistoryChatKey = activeEntry ? getChatHistoryEntryKey(activeEntry) : null;
+  }
+  if (!Array.isArray(recentChats) || recentChats.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'detail-copy';
+    empty.textContent = t('noRecentChats');
+    el.chatHistoryList.replaceChildren(empty);
   } else {
-    elements.riskScore.textContent = 'LOW';
-    elements.riskFill.className = 'risk-fill low';
+    el.chatHistoryList.replaceChildren(...buildChatHistoryRows(recentChats));
   }
-}
-
-/**
- * Detect current platform
- */
-async function detectCurrentPlatform() {
-  try {
-    const response = await sendMessage({
-      type: 'GET_PLATFORM_INFO',
-      url: currentTab.url
-    });
-    
-    if (response.success) {
-      currentPlatform = response.platform;
-      console.log('Platform detected:', currentPlatform);
-    }
-  } catch (error) {
-    console.error('Error detecting platform:', error);
+  if (!Array.isArray(dangerousChats) || dangerousChats.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'detail-copy';
+    empty.textContent = t('noDangerousChats');
+    el.dangerousChatList.replaceChildren(empty);
+  } else {
+    el.dangerousChatList.replaceChildren(...buildChatHistoryRows(dangerousChats));
   }
+  renderChatInspector();
 }
-
-/**
- * Handle phishing scan
- */
-async function handlePhishingScan() {
-  if (!extractedContent) {
-    showError('Please extract content first');
+function renderChatInspector() {
+  if (!el.chatInspector) return;
+  const selectedEntry = getSelectedHistoryEntry();
+  const activeEntry = findActiveChatHistoryEntry();
+  const target = selectedEntry || activeEntry;
+  if (!target) {
+    setText(el.chatInspectorTitle, '--');
+    setText(el.chatInspectorStatus, t('noChatSelected'));
+    setText(el.chatInspectorCurrentRisk, '--');
+    setText(el.chatInspectorHistoricalRisk, '--');
+    setText(el.chatInspectorVisibleMessages, '--');
+    setText(el.chatInspectorLinks, '--');
+    setText(el.chatInspectorObservations, '--');
+    setText(el.chatInspectorUpdatedAt, '--');
     return;
   }
-
-  showLoading();
-
-  try {
-    // Extract image URLs from content
-    const images = extractedContent.images ? 
-      extractedContent.images.map(img => img.src || img).filter(Boolean) : 
-      [];
-
-    const response = await sendMessage({
-      type: 'DETECT_PHISHING',
-      data: {
-        url: extractedContent.url,
-        content: extractedContent.bodyText,
-        title: extractedContent.title,
-        images: images
-      }
-    });
-
-    if (response.success) {
-      const analysis = response.analysis;
-
-      // Update dashboard
-      const finalScore = analysis.finalRiskScore || analysis.riskScore || 0;
-      const riskLevel = analysis.riskLevel || 'UNKNOWN';
-      elements.riskScore.textContent = riskLevel;
-      elements.pagesCount.textContent = (threatStats.total || 0) + 1;
-      
-      // Update risk fill based on risk level
-      const riskClass = riskLevel.toLowerCase();
-      elements.riskFill.className = `risk-fill ${riskClass}`;
-      
-      // Show advanced metrics if available
-      if (analysis.details || analysis.breakdown) {
-        displayAdvancedMetrics(analysis);
-      }
-      
-      // Show results
-      let resultText = `
-<strong>Phishing Analysis Result:</strong>
-
-🚨 <strong>Risk Level:</strong> ${riskLevel} (${finalScore}/100)
-🎯 <strong>Phishing Detected:</strong> ${
-  analysis.isPhishing ? 'YES' : 
-  (finalScore > 50 ? 'Probably' : 
-  (finalScore > 30 ? 'Possibly' : 'NO'))
-}
-${analysis.recommendation ? `
-📋 <strong>Recommendation:</strong> ${analysis.recommendation.action || analysis.recommendation}
-` : ''}
-${analysis.dominantFactors && analysis.dominantFactors.length > 0 ? `
-🔍 <strong>Dominant Factors:</strong> ${analysis.dominantFactors.join(', ')}
-` : ''}
-${analysis.redFlags && analysis.redFlags.length > 0 ? `
-⚠️ <strong>Red Flags:</strong>
-${analysis.redFlags.map(flag => `• ${flag}`).join('\n')}
-` : ''}
-      `.trim();
-
-      // Add image analysis results if available
-      if (analysis.imageAnalysis) {
-        resultText += `\n\n🖼️ <strong>Image Analysis:</strong>
-• Total Images: ${analysis.imageAnalysis.totalImages}
-• Analyzed: ${analysis.imageAnalysis.analyzedImages}
-• Malicious: ${analysis.imageAnalysis.maliciousCount}
-• Max Risk: ${analysis.imageAnalysis.maxRiskLevel}`;
-      }
-      
-      showResults('Phishing Scan Results', resultText);
-      
-      // Reload stats
-      await loadThreatStats();
-    } else {
-      showError(response.error || 'Failed to scan for phishing');
-    }
-  } catch (error) {
-    console.error('Error in phishing scan:', error);
-    showError('Failed to scan for phishing');
-  } finally {
-    hideLoading();
-  }
-}
-
-/**
- * Handle sentiment analysis
- */
-async function handleSentimentAnalysis() {
-  if (!extractedContent) {
-    showError('Please extract content first');
+  const isActive = Boolean(
+    activeEntry &&
+    getChatHistoryEntryKey(activeEntry) === getChatHistoryEntryKey(target)
+  );
+  setText(el.chatInspectorTitle, target.chatName || t('unknown'));
+  setText(el.chatInspectorStatus, isActive ? t('activeChat') : t('selectedFromHistory'));
+  setText(el.chatInspectorCurrentRisk, `${Number(target.maxRiskScore ?? 0)} · ${localizeChatSeverity(target.severity || 'UNKNOWN')}`);
+  setText(el.chatInspectorHistoricalRisk, `${Number(target.historicalMaxRiskScore ?? target.maxRiskScore ?? 0)} · ${localizeChatSeverity(target.historicalSeverity || target.severity || 'UNKNOWN')}`);
+  setText(el.chatInspectorVisibleMessages, Number(target.visibleMessages ?? 0));
+  setText(el.chatInspectorLinks, Number(target.links ?? 0));
+  setText(el.chatInspectorObservations, Number(target.observations ?? 0));
+  setText(el.chatInspectorUpdatedAt, formatLocalTimestamp(target.updatedAt));
+}function renderHistory() {
+  const metrics = threatStats?.dashboard;
+  if (!metrics?.available) {
+    [el.metricAnalyses,el.metricMalicious,el.metricInconclusive,el.metricAvgRisk,el.metricLatency,el.metricTrend].forEach(n=>setText(n,'--'));
+    setText(el.historyStatus, t('storageUnavailable'));
+    el.riskDistribution.replaceChildren();
+    renderChatHistory();
     return;
   }
-
-  showLoading();
-
+  setText(el.metricAnalyses, metrics.totals.analyses);
+  setText(el.metricMalicious, metrics.totals.malicious);
+  setText(el.metricInconclusive, metrics.totals.inconclusive);
+  setText(el.metricAvgRisk, metrics.averages.riskScore);
+  setText(el.metricLatency, formatLatency(metrics.averages.latencyMs));
+  const delta = metrics.trend.delta;
+  setText(el.metricTrend, (delta > 0 ? '+' : '') + delta);
+  const max = Math.max(1, ...Object.values(metrics.byRiskLevel || {}));
+  const levels = ['LOW','MEDIUM','MEDIUM_HIGH','HIGH','CRITICAL','UNKNOWN'];
+  const rows = levels.filter(level => metrics.byRiskLevel?.[level]).map(level => {
+    const row=document.createElement('div'); row.className='distribution-row';
+    const label=document.createElement('span'); label.textContent=localizeRiskLevel(level);
+    const track=document.createElement('div'); track.className='distribution-track';
+    const fill=document.createElement('div'); fill.className='distribution-fill';
+    fill.style.width=(metrics.byRiskLevel[level]/max*100)+'%'; track.appendChild(fill);
+    const count=document.createElement('strong'); count.textContent=String(metrics.byRiskLevel[level]);
+    row.append(label,track,count); return row;
+  });
+  el.riskDistribution.replaceChildren(...rows);
+  setText(el.historyStatus, `${metrics.period.days} ${t('historyWindow')} · max ${metrics.period.maxEvents} ${t('localMetadataEvents')}`);
+  renderChatHistory();
+}
+async function extractContent({ preferSnapshot=true } = {}) {
+  if (!currentTab) throw new Error(t('noContent'));
+  if ((currentTab.url || '').includes('web.whatsapp.com')) {
+    try {
+      const snapshot = await sendMessage({ type:'GET_LAST_WHATSAPP_SNAPSHOT' });
+      if (snapshot.success && snapshot.snapshot?.tabId === currentTab.id) {
+        currentChatSnapshot = snapshot.snapshot;
+        if (preferSnapshot) return snapshot.snapshot.content;
+      }
+    } catch {}
+  }
+  const response = await sendMessage({ type:'GET_TAB_CONTENT', tabId:currentTab.id });
+  if (!response.success || !response.content) throw new Error(response.error || t('noContent'));
+  return response.content;
+}
+function renderContentMetrics() {
+  const stats = extractedContent?.stats || {};
+  setText(el.contentPlatform, localizePlatform(currentPlatform));
+  setText(el.contentWords, stats.wordCount ?? '--');
+  setText(el.contentMessages, stats.paragraphCount ?? extractedContent?.paragraphs?.length ?? '--');
+  setText(el.contentLinks, stats.linkCount ?? extractedContent?.links?.length ?? 0);
+  setText(el.contentForms, stats.formCount ?? extractedContent?.forms?.length ?? 0);
+}
+function normalizeAnalysis(analysis={}) {
+  const score = Number(analysis.finalRiskScore ?? analysis.riskScore);
+  const classification = analysis.classification || (analysis.isPhishing ? 'PHISHING' : 'INCONCLUSIVE');
+  const level = analysis.riskLevel || 'UNKNOWN';
+  const status = analysis.status || (classification === 'INCONCLUSIVE' || level === 'UNKNOWN' ? 'INCONCLUSIVE' : 'VALID');
+  return {
+    raw:analysis, score:Number.isFinite(score)?Math.max(0,Math.min(100,Math.round(score))):0,
+    classification, level, status, confidence:Math.max(0,Math.min(100,Math.round(Number(analysis.confidence)||0))),
+    recommendation:typeof analysis.recommendation==='object' ? analysis.recommendation.action : analysis.recommendation,
+    evidence:Array.isArray(analysis.evidence)?analysis.evidence:(Array.isArray(analysis.redFlags)?analysis.redFlags:[]),
+    signals:Array.isArray(analysis.semanticSignals)?analysis.semanticSignals:(Array.isArray(analysis.dominantFactors)?analysis.dominantFactors:[]),
+    language:analysis.language || 'unknown'
+  };
+}
+function renderRisk(analysis) {
+  const result=normalizeAnalysis(analysis);
+  currentAnalysis=result;
+  setText(el.riskScore,result.score); setText(el.riskLevel,localizeRiskLevel(result.level)); setText(el.classification,localizeClassification(result.classification));
+  setText(el.analysisStatus,localizeStatus(result.status)); setText(el.recommendation,result.recommendation || t('noEvidence'));
+  setText(el.confidenceValue,result.confidence+'%'); el.confidenceFill.style.width=result.confidence+'%';
+  el.riskPanel.dataset.level=result.level.toLowerCase(); setText(el.contentLanguage,localizeLanguageCode(result.language));
+  const chips=result.signals.map(signal=>{const node=document.createElement('span');node.className='signal-chip';node.textContent=localizeSignal(signal);return node;});
+  el.signalChips.replaceChildren(...chips);
+  const evidence=result.evidence.length?result.evidence:[t('noEvidence')];
+  el.evidenceList.replaceChildren(...evidence.map(value=>{const node=document.createElement('li');node.textContent=String(value);return node;}));
+  setText(el.evidenceCount,result.evidence.length);
+}
+function renderSentiment(analysis={}) {
+  currentSentiment=analysis;
+  setText(el.valenceValue, Number.isFinite(Number(analysis.valence))?Number(analysis.valence).toFixed(2):'--');
+  setText(el.arousalValue, Number.isFinite(Number(analysis.arousal))?Number(analysis.arousal).toFixed(2):'--');
+  setText(el.dominanceValue, Number.isFinite(Number(analysis.dominance))?Number(analysis.dominance).toFixed(2):'--');
+  setText(el.urgencyValue, analysis.urgencyLevel ? localizeRiskLevel(analysis.urgencyLevel) : '--');
+  const manipulated=analysis.manipulationDetected || Number(analysis.manipulationScore)>0.3;
+  setText(el.manipulationValue, manipulated?t('yes'):t('no'));
+  setText(el.trustValue, analysis.trustworthiness ? localizeRiskLevel(analysis.trustworthiness) : '--');
+}
+function updateTechnical() {
+  const safe = { platform:currentPlatform, contentStats:extractedContent?.stats||{}, risk:currentAnalysis?.raw||null, sentiment:currentSentiment, summaryAvailable:Boolean(currentSummary) };
+  setText(el.technicalContent, JSON.stringify(safe,null,2));
+}
+async function runFullAnalysis({ forceExtract=true }={}) {
+  if (running) return;
+  running=true; el.reanalyzeBtn.disabled=true; showNotice(''); resetPipeline(); let partial=false;
   try {
-    const response = await sendMessage({
-      type: 'ANALYZE_SENTIMENT',
-      data: {
-        content: extractedContent.bodyText,
-        url: extractedContent.url
-      }
-    });
-
-    if (response.success) {
-      const analysis = response.analysis;
-      
-      let resultText = `
-<strong>Sentiment Analysis Result:</strong>
-
-😊 <strong>Sentiment:</strong> ${analysis.sentiment || analysis.sentimentScore ? analysis.sentiment : 'NEUTRAL'} 
-⚡ <strong>Urgency Level:</strong> ${analysis.urgencyLevel || 'N/A'}
-${analysis.manipulationDetected || analysis.manipulationScore > 0.3 ? 
-  '⚠️ <strong>Manipulation Detected:</strong> YES' : 
-  '✅ <strong>Manipulation Detected:</strong> NO'}
-${analysis.emotionalTriggers && analysis.emotionalTriggers.length > 0 ? `
-🎭 <strong>Emotional Triggers:</strong>
-${analysis.emotionalTriggers.map(trigger => `• ${trigger}`).join('\n')}
-` : ''}
-🛡️ <strong>Trustworthiness:</strong> ${analysis.trustworthiness || 'UNKNOWN'}
-📊 <strong>Recommendation:</strong> ${analysis.recommendation || 'SAFE'}
-      `.trim();
-
-      // Show VAD profile if available
-      if (analysis.valence !== undefined || analysis.arousal !== undefined) {
-        resultText += `\n\n<strong>Emotional Profile (VAD):</strong>
-• <strong>Valence:</strong> ${analysis.valence?.toFixed(2) || 0} (negative to positive)
-• <strong>Arousal:</strong> ${analysis.arousal?.toFixed(2) || 0} (calm to urgent)
-• <strong>Dominance:</strong> ${analysis.dominance?.toFixed(2) || 0.5} (powerless to empowered)
-${analysis.emotionalState ? `• <strong>State:</strong> ${analysis.emotionalState}` : ''}`;
-      }
-      
-      showResults('Sentiment Analysis', resultText);
-    } else {
-      showError(response.error || 'Failed to analyze sentiment');
+    if (forceExtract && isWhatsAppCurrentTab()) {
+      await requestWhatsAppVisibleReanalysis();
     }
-  } catch (error) {
-    console.error('Error in sentiment analysis:', error);
-    showError('Failed to analyze sentiment');
-  } finally {
-    hideLoading();
-  }
+    if (forceExtract || !extractedContent) {
+      setStep('stepExtract','running',t('running')); setProgress(8,t('extracting'));
+      try { extractedContent=await extractContent({ preferSnapshot: !forceExtract }); renderContentMetrics(); setStep('stepExtract','done',t('done')); }
+      catch(error){setStep('stepExtract','failed',t('failed'));showNotice(error.message);setProgress(100,t('partial'));return;}
+    } else setStep('stepExtract','done',t('done'));
+    if (!aiAvailable) {
+      renderRisk({ status:'INCONCLUSIVE',classification:'INCONCLUSIVE',riskLevel:'UNKNOWN',confidence:0,recommendation:t('aiUnavailable') });
+      ['stepRisk','stepSentiment','stepSummary'].forEach(id=>setStep(id,'failed',t('unavailable')));
+      showNotice(t('aiUnavailable')); setProgress(100,t('partial')); return;
+    }
+    setStep('stepRisk','running',t('running')); setProgress(25,t('analyzingRisk'));
+    try {
+      const response=await sendMessage({type:'DETECT_PHISHING',data:{url:extractedContent.url||currentTab.url,content:extractedContent.bodyText||'',title:extractedContent.title||currentTab.title,images:[],platform:currentPlatform}});
+      if(!response.success)throw new Error(response.error||t('failed'));renderRisk(response.analysis);setStep('stepRisk','done',t('done'));
+    } catch(error){partial=true;renderRisk({status:'INCONCLUSIVE',classification:'INCONCLUSIVE',riskLevel:'UNKNOWN',recommendation:error.message});setStep('stepRisk','failed',t('failed'));}
+    setStep('stepSentiment','running',t('running'));setProgress(55,t('analyzingLanguage'));
+    try {
+      const response=await sendMessage({type:'ANALYZE_SENTIMENT',data:{content:extractedContent.bodyText||'',url:extractedContent.url||currentTab.url}});
+      if(!response.success)throw new Error(response.error||t('failed'));renderSentiment(response.analysis);setStep('stepSentiment','done',t('done'));
+    } catch{partial=true;setStep('stepSentiment','failed',t('failed'));}
+    setStep('stepSummary','running',t('running'));setProgress(78,t('summarizing'));
+    try {
+      const response=await sendMessage({type:'SUMMARIZE_CONTENT',data:{content:extractedContent.bodyText||'',maxLength:120}});
+      if(!response.success)throw new Error(response.error||t('failed'));currentSummary=response.summary||'';setText(el.summaryContent,currentSummary);setStep('stepSummary','done',t('done'));
+    } catch{partial=true;setText(el.summaryContent,t('failed'));setStep('stepSummary','failed',t('failed'));}
+    await loadThreatStats(); updateTechnical(); setProgress(100,partial?t('partial'):t('complete'));
+  } finally { running=false; el.reanalyzeBtn.disabled=false; }
 }
+function setupEvents() {
+  el.reanalyzeBtn.addEventListener('click',()=>runFullAnalysis({forceExtract:true}));
+  el.moreBtn.addEventListener('click',()=>{el.moreMenu.hidden=!el.moreMenu.hidden;el.moreBtn.setAttribute('aria-expanded',String(!el.moreMenu.hidden));});
+  el.extractBtn.addEventListener('click',()=>{el.moreMenu.hidden=true;runFullAnalysis({forceExtract:true});});
+  el.customPromptBtn.addEventListener('click',()=>{el.moreMenu.hidden=true;el.promptSection.hidden=false;el.promptInput.focus();});
+  el.cancelPromptBtn.addEventListener('click',()=>{el.promptSection.hidden=true;});
+  el.technicalBtn.addEventListener('click',()=>{el.moreMenu.hidden=true;updateTechnical();el.technicalSection.hidden=false;});
+  el.closeTechnicalBtn.addEventListener('click',()=>{el.technicalSection.hidden=true;});
+  el.sendPromptBtn.addEventListener('click',async()=>{
+    const prompt=el.promptInput.value.trim();if(!prompt||!extractedContent)return;el.sendPromptBtn.disabled=true;
+    try{const response=await sendMessage({type:'ANALYZE_TAB_CONTENT',data:{content:extractedContent.bodyText,url:extractedContent.url,title:extractedContent.title,prompt}});setText(el.technicalContent,response.analysis||response.error||'');el.technicalSection.hidden=false;el.promptSection.hidden=true;showNotice(t('promptComplete'));}
+    finally{el.sendPromptBtn.disabled=false;}
+  });
+}
+async function init() {
+  applyTranslations(); setupEvents();
+  await Promise.all([loadCurrentTab(),checkAIAvailability(),loadThreatStats()]);
+  await detectPlatform();
+  await runFullAnalysis({forceExtract:true});
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
 
-/**
- * Update dashboard on content extraction
- */
-function updateDashboardOnExtract() {
-  if (elements.pagesCount) {
-    const currentCount = parseInt(elements.pagesCount.textContent) || 0;
-    elements.pagesCount.textContent = currentCount + 1;
-  }
-}
 
-// Initialize popup when DOM is loaded
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', init);
-} else {
-  init();
-}
+

@@ -5,16 +5,33 @@
 
 const OFFSCREEN_URL = 'src/offscreen/offscreen.html';
 const REQ_TYPE = 'SPAI_OFFSCREEN_AI_REQUEST';
+const SUPPORTED_OUTPUT_LANGUAGES = new Set(['de', 'en', 'es', 'fr', 'ja']);
+const PROMPT_REQUEST_TIMEOUT_MS = 190000;
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
 function pickOutputLanguage() {
-  const lang = (typeof navigator !== 'undefined' && navigator.language ? navigator.language : 'en').toLowerCase();
-  if (lang.startsWith('es')) return 'es';
-  if (lang.startsWith('ja')) return 'ja';
-  return 'en';
+  const raw = (typeof navigator !== 'undefined' && navigator.language ? navigator.language : 'en').toLowerCase();
+  const lang = raw.split('-')[0];
+  return SUPPORTED_OUTPUT_LANGUAGES.has(lang) ? lang : 'en';
+}
+
+function normalizeLanguageModelExpectations(options) {
+  const outputLanguage = SUPPORTED_OUTPUT_LANGUAGES.has(options.outputLanguage) ? options.outputLanguage : pickOutputLanguage();
+
+  options.outputLanguage = outputLanguage;
+
+  if (!Array.isArray(options.expectedInputs) || options.expectedInputs.length === 0) {
+    options.expectedInputs = [{ type: 'text', languages: Array.from(new Set(['en', outputLanguage])) }];
+  }
+
+  if (!Array.isArray(options.expectedOutputs) || options.expectedOutputs.length === 0) {
+    options.expectedOutputs = [{ type: 'text', languages: [outputLanguage] }];
+  }
+
+  return options;
 }
 
 function normalizeSessionOptions(inputOptions = {}) {
@@ -29,11 +46,27 @@ function normalizeSessionOptions(inputOptions = {}) {
   }
 
   // Some Chrome builds require an explicit output language for safety attestation.
-  if (!Object.prototype.hasOwnProperty.call(options, 'outputLanguage')) {
-    options.outputLanguage = pickOutputLanguage(); // must be one of: en, es, ja
-  }
+  return normalizeLanguageModelExpectations(options);
+}
 
-  return options;
+function isReadyAvailability(availability) {
+  return availability === 'readily' || availability === 'available';
+}
+
+function isTransientAvailability(availability) {
+  return availability === 'after-download' || availability === 'downloadable' || availability === 'downloading';
+}
+
+function isUnavailableStatus(availability) {
+  return availability === 'no' || availability === 'unavailable';
+}
+
+function canAttemptLanguageModelSession(availability) {
+  return isReadyAvailability(availability) || isTransientAvailability(availability);
+}
+
+function shouldCacheAvailability(availability) {
+  return isReadyAvailability(availability) || isUnavailableStatus(availability);
 }
 
 export class AIOffscreenProxy {
@@ -43,6 +76,7 @@ export class AIOffscreenProxy {
     this.aiAvailable = false;
     this._creatingOffscreen = null;
     this._sessionOptions = new Map(); // sessionId -> normalized options (at least outputLanguage)
+    this._sessionInflightPrompts = new Map(); // sessionId -> Promise
   }
 
   _envInfo() {
@@ -115,32 +149,41 @@ export class AIOffscreenProxy {
     await this._ensureOffscreenDocument();
 
     const msg = { type: REQ_TYPE, action, payload };
-
     const sendPromise = chrome.runtime.sendMessage(msg);
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error(`Offscreen request timeout (${timeoutMs}ms): ${action}`)), timeoutMs)
-    );
+    let timeoutId = null;
 
-    const res = await Promise.race([sendPromise, timeoutPromise]);
-    if (!res || res.ok !== true) {
-      const errStr =
-        typeof res?.error === 'string'
-          ? res.error
-          : res?.error
-            ? JSON.stringify(res.error)
-            : null;
-      console.error('[spai][ai-proxy] offscreen request failed', { action, response: res });
-      throw new Error(errStr || `Offscreen request failed: ${action}`);
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error(`Offscreen request timeout (${timeoutMs}ms): ${action}`)), timeoutMs);
+    });
+
+    try {
+      const res = await Promise.race([sendPromise, timeoutPromise]);
+      if (!res || res.ok !== true) {
+        const errStr =
+          typeof res?.error === 'string'
+            ? res.error
+            : res?.error
+              ? JSON.stringify(res.error)
+              : null;
+        console.error('[spai][ai-proxy] offscreen request failed', { action, response: res });
+        throw new Error(errStr || `Offscreen request failed: ${action}`);
+      }
+      return res.result;
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
     }
-    return res.result;
   }
 
   /**
-   * Mirrors AISessionManager.checkAvailability()
-   * @returns {Promise<string>} 'readily' | 'after-download' | 'no'
+   * Mirrors AISessionManager.checkAvailability(). Transient Chrome Built-in AI
+   * states must be rechecked because downloads and model warm-up finish outside
+   * the extension process.
+   * @param {{ force?: boolean }} options
+   * @returns {Promise<string>} Chrome availability status.
    */
-  async checkAvailability() {
-    if (this.availabilityChecked && this.availability) return this.availability;
+  async checkAvailability(options = {}) {
+    const forceRefresh = options?.force === true;
+    if (!forceRefresh && this.availabilityChecked && this.availability) return this.availability;
 
     try {
       const env = this._envInfo();
@@ -148,8 +191,8 @@ export class AIOffscreenProxy {
       const caps = await this._send('capabilities', {}, 4000);
       const availability = caps?.availability || (typeof caps?.available === 'string' ? caps.available : 'no');
       this.availability = availability;
-      this.aiAvailable = availability === 'readily' || availability === 'after-download';
-      this.availabilityChecked = true;
+      this.aiAvailable = canAttemptLanguageModelSession(availability);
+      this.availabilityChecked = shouldCacheAvailability(availability);
       console.log('[spai][ai-proxy] availability:', this.availability);
       return this.availability;
     } catch (e) {
@@ -166,8 +209,8 @@ export class AIOffscreenProxy {
   }
 
   async getCapabilities() {
-    const availability = await this.checkAvailability();
-    if (availability === 'no') {
+    const availability = await this.checkAvailability({ force: true });
+    if (isUnavailableStatus(availability)) {
       return {
         available: false,
         availability: 'no',
@@ -191,7 +234,7 @@ export class AIOffscreenProxy {
   async hasSummarizationAPI() {
     try {
       const res = await this._send('summarizerAvailable', {}, 4000);
-      return res?.available === true || res?.availability === 'readily' || res?.availability === 'after-download';
+      return res?.available === true || canAttemptLanguageModelSession(res?.availability);
     } catch (e) {
       console.warn('[spai][ai-proxy] summarizerAvailable check failed:', e?.message || e);
       return false;
@@ -206,8 +249,8 @@ export class AIOffscreenProxy {
    * Returns a session proxy object with .prompt(), matching existing callers.
    */
   async createSession(options = {}) {
-    const availability = await this.checkAvailability();
-    if (availability === 'no') {
+    const availability = await this.checkAvailability({ force: true });
+    if (isUnavailableStatus(availability)) {
       const error = new Error('AI_UNAVAILABLE: Chrome Built-in AI is not available');
       error.code = 'AI_UNAVAILABLE';
       throw error;
@@ -215,6 +258,9 @@ export class AIOffscreenProxy {
 
     const normalized = normalizeSessionOptions(options);
     const { sessionId } = await this._send('createSession', { options: normalized }, 8000);
+    this.availability = 'readily';
+    this.aiAvailable = true;
+    this.availabilityChecked = true;
     this._sessionOptions.set(sessionId, normalized);
     return this._createSessionProxy(sessionId, normalized);
   }
@@ -223,9 +269,24 @@ export class AIOffscreenProxy {
     return {
       __spaiSessionProxy: true,
       sessionId,
-      prompt: async (promptText) => {
+      prompt: async (promptText, promptOptions = {}) => {
         const opts = this._sessionOptions.get(sessionId) || normalized;
-        const res = await this._send('prompt', { sessionId, prompt: promptText, options: { outputLanguage: opts.outputLanguage } }, 60000);
+        const requestOptions = {
+          outputLanguage: opts.outputLanguage,
+          responseConstraint: promptOptions.responseConstraint,
+          omitResponseConstraintInput: promptOptions.omitResponseConstraintInput === true
+        };
+        const inflightPrompt = this._send(
+          'prompt',
+          { sessionId, prompt: promptText, options: requestOptions },
+          PROMPT_REQUEST_TIMEOUT_MS
+        ).finally(() => {
+          if (this._sessionInflightPrompts.get(sessionId) === inflightPrompt) {
+            this._sessionInflightPrompts.delete(sessionId);
+          }
+        });
+        this._sessionInflightPrompts.set(sessionId, inflightPrompt);
+        const res = await inflightPrompt;
         return res.text;
       },
       destroy: async () => {
@@ -241,7 +302,12 @@ export class AIOffscreenProxy {
   async destroySession(session = null) {
     const sessionId = session?.sessionId;
     if (!sessionId) return;
+    const inflightPrompt = this._sessionInflightPrompts.get(sessionId);
+    if (inflightPrompt) {
+      await inflightPrompt.catch(() => {});
+    }
     await this._send('destroySession', { sessionId }, 8000);
+    this._sessionInflightPrompts.delete(sessionId);
     this._sessionOptions.delete(sessionId);
   }
 

@@ -135,6 +135,24 @@ describe('AISessionManager', () => {
       expect(capabilities.defaultTemperature).toBeLessThanOrEqual(1);
       expect(capabilities.defaultTopK).toBeGreaterThan(0);
     });
+
+    test('should pass outputLanguage and tolerate null params from Chrome', async () => {
+      global.self.LanguageModel.params = jest.fn().mockResolvedValue(null);
+      const capabilities = await manager.getCapabilities();
+      expect(capabilities.defaultTemperature).toBe(0.8);
+      expect(global.self.LanguageModel.availability).toHaveBeenCalledWith(
+        expect.objectContaining({
+          outputLanguage: 'en',
+          expectedOutputs: [{ type: 'text', languages: ['en'] }]
+        })
+      );
+      expect(global.self.LanguageModel.params).toHaveBeenCalledWith(
+        expect.objectContaining({
+          outputLanguage: 'en',
+          expectedOutputs: [{ type: 'text', languages: ['en'] }]
+        })
+      );
+    });
   });
 
   describe('createSession', () => {
@@ -147,7 +165,10 @@ describe('AISessionManager', () => {
     test('should accept custom temperature and topK options', async () => {
       const options = { temperature: 0.5, topK: 20 };
       await manager.createSession(options);
-      expect(global.self.LanguageModel.create).toHaveBeenCalledWith(expect.objectContaining(options));
+      expect(global.self.LanguageModel.create).toHaveBeenCalledWith(expect.objectContaining({
+        ...options,
+        expectedOutputs: [{ type: 'text', languages: ['en'] }]
+      }));
     });
 
     test('should store session in manager.session', async () => {
@@ -348,7 +369,7 @@ describe('AISessionManager', () => {
     test('should send prompt to active session', async () => {
       manager.session = mockSession;
       const response = await manager.prompt('Test prompt');
-      expect(mockSession.prompt).toHaveBeenCalledWith('Test prompt');
+      expect(mockSession.prompt).toHaveBeenCalledWith('Test prompt', expect.objectContaining({ outputLanguage: 'en' }));
       expect(response).toBe('Test response');
     });
 
@@ -362,7 +383,7 @@ describe('AISessionManager', () => {
     test('should use provided session if given', async () => {
       const customSession = { prompt: jest.fn().mockResolvedValue('Custom response') };
       const response = await manager.prompt('Test prompt', customSession);
-      expect(customSession.prompt).toHaveBeenCalledWith('Test prompt');
+      expect(customSession.prompt).toHaveBeenCalledWith('Test prompt', expect.objectContaining({ outputLanguage: 'en' }));
       expect(response).toBe('Custom response');
     });
 
@@ -377,7 +398,7 @@ describe('AISessionManager', () => {
       manager.session = mockSession;
       const longPrompt = 'a'.repeat(1000);
       await manager.prompt(longPrompt);
-      expect(mockSession.prompt).toHaveBeenCalledWith(longPrompt);
+      expect(mockSession.prompt).toHaveBeenCalledWith(longPrompt, expect.objectContaining({ outputLanguage: 'en' }));
     });
   });
 
@@ -747,13 +768,13 @@ describe('AISessionManager', () => {
       manager.session = mockSession;
       const largePrompt = 'a'.repeat(10000);
       await manager.prompt(largePrompt);
-      expect(mockSession.prompt).toHaveBeenCalledWith(largePrompt);
+      expect(mockSession.prompt).toHaveBeenCalledWith(largePrompt, expect.objectContaining({ outputLanguage: 'en' }));
     });
 
     test('should handle empty prompts', async () => {
       manager.session = mockSession;
       await manager.prompt('');
-      expect(mockSession.prompt).toHaveBeenCalledWith('');
+      expect(mockSession.prompt).toHaveBeenCalledWith('', expect.objectContaining({ outputLanguage: 'en' }));
     });
 
     test('should handle rapid session creation', async () => {

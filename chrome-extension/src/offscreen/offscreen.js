@@ -4,9 +4,18 @@
  */
 
 const REQ_TYPE = 'SPAI_OFFSCREEN_AI_REQUEST';
-
+const SUPPORTED_OUTPUT_LANGUAGES = new Set(['de', 'en', 'es', 'fr', 'ja']);
+const PROMPT_TIMEOUT_MS = 90000;
+const DESTROYED_SESSION_ERROR_FRAGMENT = 'session has been destroyed';
 let sessionSeq = 0;
-const sessions = new Map(); // sessionId -> LanguageModel session
+const sessions = new Map(); // sessionId -> { session, activePrompts, destroyRequested }
+let promptQueue = Promise.resolve();
+
+function enqueuePrompt(operation) {
+  const queued = promptQueue.then(operation, operation);
+  promptQueue = queued.catch(() => undefined);
+  return queued;
+}
 
 function nextSessionId() {
   sessionSeq += 1;
@@ -14,10 +23,34 @@ function nextSessionId() {
 }
 
 function pickOutputLanguage() {
-  const lang = (typeof navigator !== 'undefined' && navigator.language ? navigator.language : 'en').toLowerCase();
-  if (lang.startsWith('es')) return 'es';
-  if (lang.startsWith('ja')) return 'ja';
-  return 'en';
+  const raw = (typeof navigator !== 'undefined' && navigator.language ? navigator.language : 'en').toLowerCase();
+  const lang = raw.split('-')[0];
+  return SUPPORTED_OUTPUT_LANGUAGES.has(lang) ? lang : 'en';
+}
+
+
+function normalizeSummarizerOptions(inputOptions = {}) {
+  const options = { ...(inputOptions || {}) };
+  options.outputLanguage = SUPPORTED_OUTPUT_LANGUAGES.has(options.outputLanguage)
+    ? options.outputLanguage
+    : pickOutputLanguage();
+  return options;
+}
+
+function normalizeLanguageModelExpectations(options) {
+  const outputLanguage = SUPPORTED_OUTPUT_LANGUAGES.has(options.outputLanguage) ? options.outputLanguage : pickOutputLanguage();
+
+  options.outputLanguage = outputLanguage;
+
+  if (!Array.isArray(options.expectedInputs) || options.expectedInputs.length === 0) {
+    options.expectedInputs = [{ type: 'text', languages: Array.from(new Set(['en', outputLanguage])) }];
+  }
+
+  if (!Array.isArray(options.expectedOutputs) || options.expectedOutputs.length === 0) {
+    options.expectedOutputs = [{ type: 'text', languages: [outputLanguage] }];
+  }
+
+  return options;
 }
 
 function normalizeSessionOptions(inputOptions = {}) {
@@ -30,55 +63,61 @@ function normalizeSessionOptions(inputOptions = {}) {
     if (!hasTopK) options.topK = 40;
   }
 
-  if (!Object.prototype.hasOwnProperty.call(options, 'outputLanguage')) {
-    options.outputLanguage = pickOutputLanguage(); // supported: en, es, ja
-  }
-
-  return options;
+  return normalizeLanguageModelExpectations(options);
 }
 
 function normalizeLanguageModelParams(params = {}) {
+  const safeParams = params && typeof params === 'object' ? params : {};
   return {
-    defaultTemperature: typeof params.defaultTemperature === 'number' ? params.defaultTemperature : 0.8,
-    defaultTopK: typeof params.defaultTopK === 'number' ? params.defaultTopK : 40,
-    maxTopK: typeof params.maxTopK === 'number' ? params.maxTopK : 40
+    defaultTemperature: typeof safeParams.defaultTemperature === 'number' ? safeParams.defaultTemperature : 0.8,
+    defaultTopK: typeof safeParams.defaultTopK === 'number' ? safeParams.defaultTopK : 40,
+    maxTopK: typeof safeParams.maxTopK === 'number' ? safeParams.maxTopK : 40
   };
 }
 
 function isAvailableStatus(availability) {
-  return availability === 'readily' || availability === 'after-download';
+  return (
+    availability === 'readily' ||
+    availability === 'available' ||
+    availability === 'after-download' ||
+    availability === 'downloadable' ||
+    availability === 'downloading'
+  );
 }
 
 async function getLanguageModelAvailability(options = {}) {
   if (typeof self === 'undefined' || !self.LanguageModel) {
     return 'no';
   }
+  const normalized = normalizeSessionOptions(options);
   if (typeof self.LanguageModel.availability === 'function') {
-    return await self.LanguageModel.availability(options);
+    return await self.LanguageModel.availability(normalized);
   }
   if (typeof self.LanguageModel.capabilities === 'function') {
-    const capabilities = await self.LanguageModel.capabilities(options);
+    const capabilities = await self.LanguageModel.capabilities(normalized);
     return capabilities?.available || capabilities?.availability || 'no';
   }
   return typeof self.LanguageModel.create === 'function' ? 'readily' : 'no';
 }
 
-async function getLanguageModelParams() {
+async function getLanguageModelParams(options = {}) {
   if (typeof self === 'undefined' || !self.LanguageModel) {
     return normalizeLanguageModelParams();
   }
+  const normalized = normalizeSessionOptions(options);
   if (typeof self.LanguageModel.params === 'function') {
-    return normalizeLanguageModelParams(await self.LanguageModel.params());
+    return normalizeLanguageModelParams(await self.LanguageModel.params(normalized));
   }
   if (typeof self.LanguageModel.capabilities === 'function') {
-    return normalizeLanguageModelParams(await self.LanguageModel.capabilities());
+    return normalizeLanguageModelParams(await self.LanguageModel.capabilities(normalized));
   }
   return normalizeLanguageModelParams();
 }
 
 async function getLanguageModelCapabilities(options = {}) {
-  const availability = await getLanguageModelAvailability(options);
-  const params = await getLanguageModelParams();
+  const normalized = normalizeSessionOptions(options);
+  const availability = await getLanguageModelAvailability(normalized);
+  const params = await getLanguageModelParams(normalized);
   return {
     available: isAvailableStatus(availability),
     availability,
@@ -90,14 +129,20 @@ async function getSummarizerAvailability(options = {}) {
   if (typeof self === 'undefined' || !self.Summarizer) {
     return 'no';
   }
+  const normalized = normalizeSummarizerOptions(options);
   if (typeof self.Summarizer.availability === 'function') {
-    return await self.Summarizer.availability(options);
+    return await self.Summarizer.availability(normalized);
   }
   return typeof self.Summarizer.create === 'function' ? 'readily' : 'no';
 }
-
 async function ensureSession(sessionId, options = {}) {
-  if (sessionId && sessions.has(sessionId)) return sessions.get(sessionId);
+  if (sessionId && sessions.has(sessionId)) {
+    const existing = sessions.get(sessionId);
+    if (existing?.destroyRequested) {
+      throw new Error('AI_SESSION_DESTROYING: Session is being destroyed');
+    }
+    return { session: existing.session, sessionId };
+  }
   if (typeof self === 'undefined' || !self.LanguageModel) {
     throw new Error('AI_UNAVAILABLE: Chrome Built-in AI is not available');
   }
@@ -112,20 +157,32 @@ async function ensureSession(sessionId, options = {}) {
     throw new Error(`AI_SESSION_FAILED: ${name}: ${msg}`);
   }
   const id = sessionId || nextSessionId();
-  sessions.set(id, session);
+  sessions.set(id, { session, activePrompts: 0, destroyRequested: false });
   return { session, sessionId: id };
+}
+
+async function finalizeSessionDestroy(sessionId, entry) {
+  if (!entry) return true;
+  try {
+    await entry.session?.destroy?.();
+  } catch (_) {
+    // ignore
+  } finally {
+    sessions.delete(sessionId);
+  }
+  return true;
 }
 
 async function destroySession(sessionId) {
   if (!sessionId) return true;
-  const s = sessions.get(sessionId);
-  if (s) {
-    try {
-      await s.destroy?.();
-    } catch (_) {
-      // ignore
+  const entry = sessions.get(sessionId);
+  if (entry) {
+    if (entry.activePrompts > 0) {
+      entry.destroyRequested = true;
+      sessions.set(sessionId, entry);
+      return true;
     }
-    sessions.delete(sessionId);
+    await finalizeSessionDestroy(sessionId, entry);
   }
   return true;
 }
@@ -135,12 +192,13 @@ async function summarizeText(text, options = {}) {
     throw new Error('AI_UNAVAILABLE: Chrome Built-in AI Summarizer is not available');
   }
 
-  const summarizerOptions = {
+  const summarizerOptions = normalizeSummarizerOptions({
     type: options.type || 'key-points',
     format: options.format || 'markdown',
     length: options.length || 'medium',
-    sharedContext: options.context || ''
-  };
+    sharedContext: options.context || '',
+    outputLanguage: options.outputLanguage
+  });
 
   const availability = await getSummarizerAvailability(summarizerOptions);
   if (!isAvailableStatus(availability)) {
@@ -175,7 +233,7 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       }
 
       case 'capabilities': {
-        const caps = await getLanguageModelCapabilities();
+        const caps = await getLanguageModelCapabilities(payload?.options || {});
         return { ok: true, result: caps };
       }
 
@@ -229,28 +287,48 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       case 'prompt': {
         const { sessionId, prompt, options } = payload || {};
         const ensured = await ensureSession(sessionId, options || {});
+        const entry = sessions.get(ensured.sessionId || sessionId);
         const session = ensured.session || ensured;
         const actualSessionId = ensured.sessionId || sessionId;
         const outLang =
           (options && typeof options === 'object' && options.outputLanguage) ? options.outputLanguage : pickOutputLanguage();
 
-        let text;
-        try {
-          text = await session.prompt(prompt, { outputLanguage: outLang });
-        } catch (e1) {
-          try {
-            text = await session.prompt(prompt, { language: outLang });
-          } catch (e2) {
-            try {
-              text = await session.prompt(prompt);
-            } catch (e3) {
-              const name = e3?.name || e2?.name || e1?.name || 'Error';
-              const msg = e3?.message || e2?.message || e1?.message || String(e3 || e2 || e1);
-              console.error('[spai][offscreen] prompt failed', { name, msg, outLang });
-              throw new Error(`AI_PROMPT_FAILED: ${name}: ${msg}`);
-            }
-          }
+        if (!entry) {
+          throw new Error('AI_SESSION_MISSING: Session not found');
         }
+
+        const text = await enqueuePrompt(async () => {
+          const abortController = new AbortController();
+          const timeoutId = setTimeout(() => abortController.abort('Gemini Nano prompt timeout'), PROMPT_TIMEOUT_MS);
+          entry.activePrompts += 1;
+          try {
+            const promptOptions = {
+              outputLanguage: outLang,
+              signal: abortController.signal
+            };
+            if (options?.responseConstraint && typeof options.responseConstraint === 'object') {
+              promptOptions.responseConstraint = options.responseConstraint;
+              promptOptions.omitResponseConstraintInput = options.omitResponseConstraintInput === true;
+            }
+            return await session.prompt(prompt, promptOptions);
+          } catch (error) {
+            const name = error?.name || 'Error';
+            const msg = error?.message || String(error);
+            if (name === 'InvalidStateError' && String(msg).toLowerCase().includes(DESTROYED_SESSION_ERROR_FRAGMENT)) {
+              throw new Error(`AI_SESSION_DESTROYED: ${msg}`);
+            }
+            console.error(`[spai][offscreen] prompt failed: ${name}: ${msg} (outputLanguage=${outLang})`);
+            throw new Error(`AI_PROMPT_FAILED: ${name}: ${msg}`);
+          } finally {
+            entry.activePrompts = Math.max(0, entry.activePrompts - 1);
+            if (entry.destroyRequested && entry.activePrompts === 0) {
+              await finalizeSessionDestroy(actualSessionId, entry);
+            } else {
+              sessions.set(actualSessionId, entry);
+            }
+            clearTimeout(timeoutId);
+          }
+        });
         return { ok: true, result: { sessionId: actualSessionId, text } };
       }
 

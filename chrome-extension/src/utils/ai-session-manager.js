@@ -3,43 +3,86 @@
  * Manages Chrome Built-in AI Prompt API sessions
  */
 
+const SUPPORTED_OUTPUT_LANGUAGES = new Set(['de', 'en', 'es', 'fr', 'ja']);
+
+function pickOutputLanguage() {
+  const raw = (typeof navigator !== 'undefined' && navigator.language ? navigator.language : 'en').toLowerCase();
+  const lang = raw.split('-')[0];
+  return SUPPORTED_OUTPUT_LANGUAGES.has(lang) ? lang : 'en';
+}
+
+
+function normalizeSummarizerOptions(inputOptions = {}) {
+  const options = { ...(inputOptions || {}) };
+  options.outputLanguage = SUPPORTED_OUTPUT_LANGUAGES.has(options.outputLanguage)
+    ? options.outputLanguage
+    : pickOutputLanguage();
+  return options;
+}
+
+function normalizeLanguageModelExpectations(options) {
+  const outputLanguage = SUPPORTED_OUTPUT_LANGUAGES.has(options.outputLanguage) ? options.outputLanguage : pickOutputLanguage();
+
+  options.outputLanguage = outputLanguage;
+
+  if (!Array.isArray(options.expectedInputs) || options.expectedInputs.length === 0) {
+    options.expectedInputs = [{ type: 'text', languages: Array.from(new Set(['en', outputLanguage])) }];
+  }
+
+  if (!Array.isArray(options.expectedOutputs) || options.expectedOutputs.length === 0) {
+    options.expectedOutputs = [{ type: 'text', languages: [outputLanguage] }];
+  }
+
+  return options;
+}
+
+function normalizeSessionOptions(inputOptions = {}) {
+  const options = { ...(inputOptions || {}) };
+
+  return normalizeLanguageModelExpectations(options);
+}
+
 function normalizeLanguageModelParams(params = {}) {
+  const safeParams = params && typeof params === 'object' ? params : {};
   return {
-    defaultTemperature: typeof params.defaultTemperature === 'number' ? params.defaultTemperature : 0.8,
-    defaultTopK: typeof params.defaultTopK === 'number' ? params.defaultTopK : 40,
-    maxTopK: typeof params.maxTopK === 'number' ? params.maxTopK : 40
+    defaultTemperature: typeof safeParams.defaultTemperature === 'number' ? safeParams.defaultTemperature : 0.8,
+    defaultTopK: typeof safeParams.defaultTopK === 'number' ? safeParams.defaultTopK : 40,
+    maxTopK: typeof safeParams.maxTopK === 'number' ? safeParams.maxTopK : 40
   };
 }
 
 async function getLanguageModelAvailability(options = {}) {
   if (typeof self === 'undefined' || !self.LanguageModel) return 'no';
+  const normalized = normalizeSessionOptions(options);
   if (typeof self.LanguageModel.availability === 'function') {
-    return await self.LanguageModel.availability(options);
+    return await self.LanguageModel.availability(normalized);
   }
   if (typeof self.LanguageModel.capabilities === 'function') {
-    const capabilities = await self.LanguageModel.capabilities(options);
+    const capabilities = await self.LanguageModel.capabilities(normalized);
     return capabilities?.available || capabilities?.availability || 'no';
   }
   return typeof self.LanguageModel.create === 'function' ? 'readily' : 'no';
 }
 
-async function getLanguageModelParams() {
+async function getLanguageModelParams(options = {}) {
   if (typeof self === 'undefined' || !self.LanguageModel) {
     return normalizeLanguageModelParams();
   }
+  const normalized = normalizeSessionOptions(options);
   if (typeof self.LanguageModel.params === 'function') {
-    return normalizeLanguageModelParams(await self.LanguageModel.params());
+    return normalizeLanguageModelParams(await self.LanguageModel.params(normalized));
   }
   if (typeof self.LanguageModel.capabilities === 'function') {
-    return normalizeLanguageModelParams(await self.LanguageModel.capabilities());
+    return normalizeLanguageModelParams(await self.LanguageModel.capabilities(normalized));
   }
   return normalizeLanguageModelParams();
 }
 
 async function getSummarizerAvailability(options = {}) {
   if (typeof self === 'undefined' || !self.Summarizer) return 'no';
+  const normalized = normalizeSummarizerOptions(options);
   if (typeof self.Summarizer.availability === 'function') {
-    return await self.Summarizer.availability(options);
+    return await self.Summarizer.availability(normalized);
   }
   return typeof self.Summarizer.create === 'function' ? 'readily' : 'no';
 }
@@ -109,8 +152,9 @@ export class AISessionManager {
    */
   async getCapabilities() {
     try {
-      const availability = await this.checkAvailability();
-      const params = await getLanguageModelParams();
+      const options = normalizeSessionOptions();
+      const availability = await this.checkAvailability(options);
+      const params = await getLanguageModelParams(options);
 
       return {
         available: availability === 'readily' || availability === 'after-download',
@@ -150,11 +194,11 @@ export class AISessionManager {
 
     try {
       // Default session options
-      const sessionOptions = {
+      const sessionOptions = normalizeSessionOptions({
         temperature: options.temperature || 0.8,
         topK: options.topK || 40,
         ...options
-      };
+      });
 
       // Create session with timeout (3 seconds for faster feedback)
       const TIMEOUT_MS = 3000;
@@ -265,7 +309,7 @@ export class AISessionManager {
     }
 
     try {
-      const response = await activeSession.prompt(prompt);
+      const response = await activeSession.prompt(prompt, { outputLanguage: pickOutputLanguage() });
       return response;
     } catch (error) {
       console.error('Error sending prompt:', error);
@@ -280,12 +324,13 @@ export class AISessionManager {
    * @returns {Promise<string>} Summary
    */
   async summarize(text, options = {}) {
-    const summarizerOptions = {
+    const summarizerOptions = normalizeSummarizerOptions({
       type: options.type || 'key-points',
       format: options.format || 'markdown',
       length: options.length || 'medium',
-      sharedContext: options.context || ''
-    };
+      sharedContext: options.context || '',
+      outputLanguage: options.outputLanguage
+    });
 
     const availability = await getSummarizerAvailability(summarizerOptions);
     if (availability === 'readily' || availability === 'after-download') {
@@ -323,7 +368,7 @@ export class AISessionManager {
         prompt = `Answer this question about the content: "${question}"\n\nContent:\n${text}\n\nProvide a concise answer (max ${maxLength} words):`;
       }
 
-      const summary = await session.prompt(prompt);
+      const summary = await session.prompt(prompt, { outputLanguage: pickOutputLanguage() });
       return summary;
 
     } catch (error) {
@@ -360,12 +405,13 @@ export class AISessionManager {
    * @returns {Promise<string>} Complete summary
    */
   async summarizeStreaming(text, options = {}, onChunk) {
-    const summarizerOptions = {
+    const summarizerOptions = normalizeSummarizerOptions({
       type: options.type || 'key-points',
       format: options.format || 'markdown',
       length: options.length || 'medium',
-      sharedContext: options.context || ''
-    };
+      sharedContext: options.context || '',
+      outputLanguage: options.outputLanguage
+    });
 
     try {
       const availability = await getSummarizerAvailability(summarizerOptions);
@@ -410,7 +456,7 @@ export class AISessionManager {
     }
 
     try {
-      const stream = await activeSession.promptStreaming(prompt);
+      const stream = await activeSession.promptStreaming(prompt, { outputLanguage: pickOutputLanguage() });
       const reader = stream.getReader();
 
       while (true) {
