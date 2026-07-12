@@ -16,47 +16,36 @@ export class PhishingDetector {
     this.hybridScorer = new HybridScorer();
     this.localAIClassifier = new LocalAIThreatClassifier(aiManager);
 
-    // Quick rule-based patterns for instant detection (no AI needed)
+    // Lightweight deterministic heuristics used before or alongside Nano.
     this.quickPatterns = {
-      // High-risk patterns (score 80-100)
-      critical: [
-        /conta.*suspens[ao]/i,           // account suspended (PT)
-        /account.*suspend/i,              // account suspended (EN)
-        /conta.*bloquead[ao]/i,           // account blocked (PT)
-        /account.*block/i,                // account blocked (EN)
-        /verifi(que|car).*conta/i,        // verify account (PT)
-        /verify.*account/i,               // verify account (EN)
-        /clique.*agora/i,                 // click now (PT)
-        /click.*now/i,                    // click now (EN)
-        /ação.*imediata/i,                // immediate action (PT)
-        /immediate.*action/i,             // immediate action (EN)
-        /sua.*senha.*expirou/i,           // your password expired (PT)
-        /password.*expired/i,             // password expired (EN)
-        /acesso.*não.*autorizado/i,       // unauthorized access (PT)
-        /unauthorized.*access/i,          // unauthorized access (EN)
-        /atividade.*suspeita/i,           // suspicious activity (PT)
-        /suspicious.*activity/i,          // suspicious activity (EN)
-        /fraude.*detectad/i,              // fraud detected (PT)
-        /fraud.*detected/i,               // fraud detected (EN)
+      credential: [
+        /verifi(que|car).*conta/i, /verify.*account/i, /senha/i, /password/i, /credencial/i, /credential/i,
+        /c[oó]digo/i, /code/i, /otp/i, /token/i, /pin/i
       ],
-      // Medium-risk patterns (score 50-79)
-      warning: [
-        /atenção/i,                       // attention (PT)
-        /attention/i,                     // attention (EN)
-        /urgente/i,                       // urgent (PT)
-        /urgent/i,                        // urgent (EN)
-        /oportunidade.*única/i,           // unique opportunity (PT)
-        /unique.*opportunity/i,           // unique opportunity (EN)
-        /última.*chance/i,                // last chance (PT)
-        /last.*chance/i,                  // last chance (EN)
-        /ganhe.*dinheiro/i,               // earn money (PT)
-        /earn.*money/i,                   // earn money (EN)
-        /prêmio/i,                        // prize (PT)
-        /prize/i,                         // prize (EN)
-        /grátis/i,                        // free (PT)
-        /free.*gift/i,                    // free gift (EN)
-        /limitad[ao]/i,                   // limited (PT)
-        /limited.*offer/i,                // limited offer (EN)
+      accountThreat: [
+        /conta.*suspens[ao]/i, /account.*suspend/i, /conta.*bloquead[ao]/i, /account.*block/i,
+        /acesso.*não.*autorizado/i, /unauthorized.*access/i, /atividade.*suspeita/i, /suspicious.*activity/i
+      ],
+      urgency: [
+        /urgente/i, /urgent/i, /imediat[ao]/i, /immediate/i, /agora/i, /now/i, /última.*chance/i, /last.*chance/i
+      ],
+      authority: [
+        /banco/i, /bank/i, /suporte/i, /support/i, /administra[cç][aã]o/i, /security team/i, /microsoft/i, /google/i
+      ],
+      reward: [
+        /pr[eê]mio/i, /prize/i, /gr[aá]tis/i, /free/i, /ganhe.*dinheiro/i, /earn.*money/i, /cashback/i, /gift/i
+      ],
+      payment: [
+        /pix/i, /boleto/i, /payment/i, /pagamento/i, /transfer/i, /crypto/i, /bitcoin/i
+      ],
+      linkAction: [
+        /clique/i, /click/i, /acesse/i, /access here/i, /link/i, /http[s]?:\/\//i, /bit\.ly/i, /tinyurl/i
+      ],
+      educational: [
+        /exemplo/i, /example/i, /treinamento/i, /training/i, /educacional/i, /awareness/i, /simula[cç][aã]o/i, /simulation/i
+      ],
+      negation: [
+        /n[aã]o clique/i, /do not click/i, /nunca compartilhe/i, /never share/i, /golpe/i, /scam alert/i, /phishing awareness/i
       ]
     };
   }
@@ -68,42 +57,111 @@ export class PhishingDetector {
    */
   quickDetect(content) {
     if (!content || typeof content !== 'string') {
-      return { score: 0, level: 'SAFE', matches: [] };
+      return { score: 0, level: 'SAFE', matches: [], semanticSignals: [], suspiciousPhrases: [], context: { educational: false, negated: false } };
     }
 
+    const text = String(content);
     const matches = [];
-    let maxScore = 0;
+    const semanticSignals = new Set();
+    const suspiciousPhrases = new Set();
+    let score = 0;
 
-    // Check critical patterns (80-100 score)
-    for (const pattern of this.quickPatterns.critical) {
-      if (pattern.test(content)) {
-        matches.push({ pattern: pattern.source, severity: 'CRITICAL' });
-        maxScore = Math.max(maxScore, 85);
+    const applyCategory = (category, severity, delta, signal = null) => {
+      for (const pattern of this.quickPatterns[category] || []) {
+        if (pattern.test(text)) {
+          matches.push({ pattern: pattern.source, severity, category });
+          suspiciousPhrases.add(pattern.source);
+          score += delta;
+          if (signal) semanticSignals.add(signal);
+        }
       }
+    };
+
+    applyCategory('credential', 'CRITICAL', 24, 'credential_request');
+    applyCategory('accountThreat', 'CRITICAL', 22, 'account_threat');
+    applyCategory('urgency', 'WARNING', 10, 'urgent_action');
+    applyCategory('authority', 'WARNING', 12, 'authority_impersonation');
+    applyCategory('reward', 'WARNING', 16, 'financial_reward');
+    applyCategory('payment', 'WARNING', 18, 'payment_request');
+    applyCategory('linkAction', 'WARNING', 12, 'link_action');
+
+    const educational = (this.quickPatterns.educational || []).some(pattern => pattern.test(text));
+    const negated = (this.quickPatterns.negation || []).some(pattern => pattern.test(text));
+
+    const uniqueCategories = new Set(matches.map(match => match.category)).size;
+    if (uniqueCategories >= 3) score += 16;
+    else if (uniqueCategories === 2) score += 8;
+
+    const hasCredentialPressure = semanticSignals.has('credential_request') && semanticSignals.has('urgent_action');
+    const hasRewardPressure = semanticSignals.has('financial_reward') && semanticSignals.has('link_action');
+    if (hasCredentialPressure) score += 18;
+    if (hasRewardPressure) score += 10;
+
+    if (educational) score -= 18;
+    if (negated) score -= 14;
+
+    score = Math.max(0, Math.min(100, score));
+
+    const level = score >= 80 ? 'HIGH'
+      : score >= 55 ? 'MEDIUM'
+      : score >= 25 ? 'LOW'
+      : 'SAFE';
+
+    return {
+      score,
+      level,
+      matches,
+      semanticSignals: Array.from(semanticSignals),
+      suspiciousPhrases: Array.from(suspiciousPhrases).slice(0, 8),
+      context: { educational, negated }
+    };
+  }
+
+  mergeHeuristicSignals(analysis, quickResult) {
+    const heuristicSignals = Array.isArray(quickResult?.semanticSignals) ? quickResult.semanticSignals : [];
+    const heuristicPhrases = Array.isArray(quickResult?.suspiciousPhrases) ? quickResult.suspiciousPhrases : [];
+    const modelSignals = Array.isArray(analysis?.semanticSignals) ? analysis.semanticSignals : [];
+    const modelEvidence = Array.isArray(analysis?.evidence) ? analysis.evidence : (Array.isArray(analysis?.redFlags) ? analysis.redFlags : []);
+    const mergedSignals = Array.from(new Set([...modelSignals, ...heuristicSignals]));
+    const mergedEvidence = Array.from(new Set([...modelEvidence, ...heuristicPhrases])).slice(0, 8);
+    const baseRiskScore = Number(analysis?.riskScore || analysis?.finalRiskScore || 0);
+    const heuristicScore = Number(quickResult?.score || 0);
+    const combinedScore = analysis?.status === 'VALID'
+      ? Math.round((baseRiskScore * 0.75) + (heuristicScore * 0.25))
+      : Math.round(Math.max(baseRiskScore, heuristicScore));
+    const mergedRiskScore = analysis?.status === 'VALID'
+      ? Math.max(baseRiskScore, combinedScore)
+      : (heuristicScore >= 80 ? combinedScore : baseRiskScore);
+
+    const finalRiskScore = Math.max(Number(analysis?.finalRiskScore || baseRiskScore || 0), mergedRiskScore);
+    const merged = {
+      ...analysis,
+      riskScore: Math.max(0, Math.min(100, mergedRiskScore)),
+      finalRiskScore: Math.max(0, Math.min(100, finalRiskScore)),
+      semanticSignals: mergedSignals,
+      evidence: mergedEvidence,
+      redFlags: mergedEvidence,
+      suspiciousPhrases: Array.from(new Set([...(analysis?.suspiciousPhrases || []), ...heuristicPhrases])).slice(0, 8),
+      heuristicScore,
+      heuristicContext: quickResult?.context || { educational: false, negated: false }
+    };
+
+    if (merged.status !== 'VALID' && quickResult?.score >= 80) {
+      merged.classification = merged.classification === 'INCONCLUSIVE' ? 'SUSPICIOUS' : merged.classification;
+      merged.recommendation = merged.recommendation === 'SAFE' ? 'CAUTION' : merged.recommendation;
     }
 
-    // Check warning patterns (50-79 score)
-    for (const pattern of this.quickPatterns.warning) {
-      if (pattern.test(content)) {
-        matches.push({ pattern: pattern.source, severity: 'WARNING' });
-        maxScore = Math.max(maxScore, 55);
-      }
+    if (merged.status === 'VALID' || heuristicScore >= 80) {
+      if (merged.finalRiskScore >= 75) merged.riskLevel = 'HIGH';
+      else if (merged.finalRiskScore >= 50) merged.riskLevel = 'MEDIUM_HIGH';
+      else if (merged.finalRiskScore >= 30) merged.riskLevel = 'MEDIUM';
+      else if (merged.finalRiskScore >= 1) merged.riskLevel = 'LOW';
+    } else {
+      merged.riskLevel = analysis?.riskLevel || 'UNKNOWN';
+      merged.classification = analysis?.classification || 'INCONCLUSIVE';
     }
 
-    // Boost score if multiple matches
-    if (matches.length >= 3) {
-      maxScore = Math.min(100, maxScore + 15);
-    } else if (matches.length >= 2) {
-      maxScore = Math.min(100, maxScore + 10);
-    }
-
-    const level = maxScore >= 80 ? 'HIGH' :
-                  maxScore >= 50 ? 'MEDIUM' :
-                  maxScore >= 30 ? 'LOW' : 'SAFE';
-
-    console.log(`🚨 Quick detect: score=${maxScore}, matches=${matches.length}`, matches.map(m => m.pattern));
-
-    return { score: maxScore, level, matches };
+    return merged;
   }
 
   /**
@@ -260,22 +318,26 @@ Provide response as JSON with exactly these top-level fields:
   }
 
   createUnknownAnalysis(reason, quickResult = null) {
-    if (quickResult && quickResult.score > 0) {
+    if (quickResult && quickResult.score >= 80) {
       return {
+        status: 'INCONCLUSIVE',
+        classification: 'SUSPICIOUS',
         riskScore: quickResult.score,
         finalRiskScore: quickResult.score,
         riskLevel: quickResult.level,
-        isPhishing: quickResult.score >= 50,
+        isPhishing: quickResult.score >= 80,
         redFlags: quickResult.matches.map(m => m.pattern),
         suspiciousPhrases: quickResult.matches.map(m => m.pattern),
         confidence: 60,
-        recommendation: quickResult.score >= 50 ? 'WARNING' : 'CAUTION',
+        recommendation: 'WARNING',
         validationError: reason,
         detectionMethod: 'deterministic_after_ai_rejection'
       };
     }
 
     return {
+      status: 'INCONCLUSIVE',
+      classification: 'INCONCLUSIVE',
       riskScore: 0,
       finalRiskScore: 0,
       riskLevel: 'UNKNOWN',
@@ -285,7 +347,7 @@ Provide response as JSON with exactly these top-level fields:
       confidence: 0,
       recommendation: 'CAUTION',
       validationError: reason,
-      detectionMethod: 'ai_schema_rejected'
+      detectionMethod: 'gemini_nano_schema_rejected'
     };
   }
 
@@ -361,11 +423,11 @@ Provide response as JSON with exactly these top-level fields:
 
     const aiClaimsHighRisk = normalized.isPhishing || normalized.riskScore >= 70 || ['HIGH', 'CRITICAL'].includes(normalized.riskLevel);
     const hasModelIndicators = Object.values(normalized.indicators).filter(Boolean).length >= 2;
-    const hasDeterministicEvidence = Boolean(quickResult && quickResult.score > 0);
+    const hasDeterministicEvidence = Boolean(quickResult && quickResult.score >= 80);
     const suppliedIndicators = Object.prototype.hasOwnProperty.call(raw, 'indicators');
 
     if (aiClaimsHighRisk && suppliedIndicators && !hasModelIndicators && !hasDeterministicEvidence) {
-      return { ok: false, error: 'AI phishing conclusion lacks independent evidence' };
+      return { ok: false, error: 'high-risk AI conclusion requires concrete evidence' };
     }
 
     return { ok: true, value: normalized };
@@ -413,7 +475,10 @@ Provide response as JSON with exactly these top-level fields:
     }
 
     const quickResult = this.quickDetect(content);
-    const deterministicSignals = quickResult.matches.map(match => `${match.severity}:${match.pattern}`);
+    const deterministicSignals = Array.from(new Set([
+      ...quickResult.matches.map(match => `${match.severity}:${match.pattern}`),
+      ...(quickResult.semanticSignals || [])
+    ]));
 
     const analysis = await this.localAIClassifier.classify({
       inputType: 'PAGE',
@@ -424,13 +489,15 @@ Provide response as JSON with exactly these top-level fields:
       deterministicSignals
     });
 
+    const mergedAnalysis = this.mergeHeuristicSignals(analysis, quickResult);
+
     // Track threats - Lower threshold for better detection (was 70, now 50)
-    if (analysis.isPhishing || analysis.riskScore > 50) {
+    if (mergedAnalysis.isPhishing || mergedAnalysis.finalRiskScore > 50) {
       this.threatsToday++;
-      this.trackThreat(url, analysis);
+      this.trackThreat(url, mergedAnalysis);
     }
 
-    return analysis;
+    return mergedAnalysis;
   }
 
   /**
@@ -513,6 +580,14 @@ Provide response as JSON with exactly these top-level fields:
       // Combine all analysis components
       return {
         ...hybridScore,
+        status: phishingAnalysis.status || 'INCONCLUSIVE',
+        classification: phishingAnalysis.classification || 'INCONCLUSIVE',
+        confidence: phishingAnalysis.confidence ?? hybridScore.confidence ?? 0,
+        semanticSignals: phishingAnalysis.semanticSignals || [],
+        evidence: phishingAnalysis.evidence || phishingAnalysis.redFlags || [],
+        suspiciousPhrases: phishingAnalysis.suspiciousPhrases || [],
+        recommendation: phishingAnalysis.recommendation || hybridScore.recommendation || 'CAUTION',
+        detectionMethod: phishingAnalysis.detectionMethod || 'hybrid_with_gemini_nano',
         originalAnalysis: {
           phishing: phishingAnalysis,
           sentiment: sentimentAnalysis,
@@ -545,14 +620,19 @@ Provide response as JSON with exactly these top-level fields:
   async detectSocialEngineering(message, senderInfo = '') {
     try {
       const quickResult = this.quickDetect(message);
-      const deterministicSignals = quickResult.matches.map(match => `${match.severity}:${match.pattern}`);
-      const analysis = await this.localAIClassifier.classify({
+      const deterministicSignals = Array.from(new Set([
+        ...quickResult.matches.map(match => `${match.severity}:${match.pattern}`),
+        ...(quickResult.semanticSignals || [])
+      ]));
+      const baseAnalysis = await this.localAIClassifier.classify({
         inputType: 'MESSAGE',
         platform: 'UNKNOWN',
         sender: senderInfo,
         content: message,
         deterministicSignals
       });
+
+      const analysis = this.mergeHeuristicSignals(baseAnalysis, quickResult);
 
       const socialSignals = new Set([
         'authority_impersonation',
@@ -606,7 +686,7 @@ Provide response as JSON with exactly these top-level fields:
       const content = String(emailText || '');
       const quickResult = this.quickDetect(`${subject || ''}\n${sender || ''}\n${content}`);
       const deterministicSignals = quickResult.matches.map(match => `${match.severity}:${match.pattern}`);
-      const analysis = await this.localAIClassifier.classify({
+      const baseAnalysis = await this.localAIClassifier.classify({
         inputType: 'EMAIL',
         platform: 'UNKNOWN',
         sender,
@@ -614,6 +694,8 @@ Provide response as JSON with exactly these top-level fields:
         content,
         deterministicSignals
       });
+
+      const analysis = this.mergeHeuristicSignals(baseAnalysis, quickResult);
 
       const senderLegitimacy = analysis.classification === 'SAFE'
         ? 'LEGITIMATE'
@@ -684,23 +766,38 @@ Provide response as JSON with exactly these top-level fields:
     return analysis;
   }
 
+  sanitizeThreatHistory(threats, now = Date.now()) {
+    if (!Array.isArray(threats)) return [];
+    const cutoff = now - (7 * 24 * 60 * 60 * 1000);
+    return threats.map(threat => {
+      const parsed = Date.parse(threat?.timestamp);
+      const timestamp = Number.isFinite(parsed) ? new Date(parsed).toISOString() : new Date(now).toISOString();
+      return {
+        riskLevel: typeof threat?.riskLevel === 'string' ? threat.riskLevel : 'UNKNOWN',
+        riskScore: Number.isFinite(Number(threat?.riskScore)) ? Math.max(0, Math.min(100, Number(threat.riskScore))) : 0,
+        timestamp
+      };
+    }).filter(threat => Date.parse(threat.timestamp) >= cutoff).slice(-250);
+  }
+
   /**
    * Rastreia ameaça no storage
    */
-  async trackThreat(url, analysis) {
+  async trackThreat(_url, analysis) {
     try {
-      const { threats = [] } = await chrome.storage.local.get('threats') || { threats: [] };
-      
+      if (typeof chrome?.storage?.local?.get !== 'function' || typeof chrome?.storage?.local?.set !== 'function') {
+        return;
+      }
+      const stored = await chrome.storage.local.get('threats') || { threats: [] };
+      const threats = this.sanitizeThreatHistory(stored.threats);
       threats.push({
-        url,
-        riskLevel: analysis.riskLevel,
-        riskScore: analysis.riskScore,
-        timestamp: new Date().toISOString(),
-        redFlags: analysis.redFlags
+        riskLevel: analysis.riskLevel || 'UNKNOWN',
+        riskScore: Number(analysis.riskScore) || 0,
+        timestamp: new Date().toISOString()
       });
 
       await chrome.storage.local.set({ 
-        threats,
+        threats: this.sanitizeThreatHistory(threats),
         threatsToday: this.threatsToday
       });
     } catch (error) {
@@ -722,6 +819,15 @@ Provide response as JSON with exactly these top-level fields:
       if (!Array.isArray(threats)) {
         console.warn('Invalid threats data in storage, resetting to empty array');
         threats = [];
+      }
+
+      threats = this.sanitizeThreatHistory(threats);
+      if (typeof chrome.storage.local.set === 'function') {
+        try {
+          await chrome.storage.local.set({ threats });
+        } catch (migrationError) {
+          console.warn('Threat history privacy migration failed:', migrationError?.message || migrationError);
+        }
       }
 
       // Use instance variable if storage value is not set
@@ -762,4 +868,12 @@ Provide response as JSON with exactly these top-level fields:
 }
 
 export default PhishingDetector;
+
+
+
+
+
+
+
+
 

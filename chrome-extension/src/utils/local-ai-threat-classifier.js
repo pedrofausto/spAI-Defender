@@ -20,6 +20,25 @@ const VALID_SEMANTIC_SIGNALS = new Set([
   'domain_mismatch'
 ]);
 
+
+const THREAT_RESPONSE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['status', 'language', 'riskScore', 'riskLevel', 'confidence', 'classification', 'semanticSignals', 'evidence', 'suspiciousPhrases', 'recommendation'],
+  properties: {
+    status: { type: 'string', enum: ['VALID', 'INVALID', 'INCONCLUSIVE'] },
+    language: { type: 'string' },
+    riskScore: { type: 'integer', minimum: 0, maximum: 100 },
+    riskLevel: { type: 'string', enum: ['LOW', 'MEDIUM', 'MEDIUM_HIGH', 'HIGH', 'CRITICAL', 'UNKNOWN'] },
+    confidence: { type: 'integer', minimum: 0, maximum: 100 },
+    classification: { type: 'string', enum: ['SAFE', 'SUSPICIOUS', 'PHISHING', 'SCAM', 'SOCIAL_ENGINEERING', 'INCONCLUSIVE'] },
+    semanticSignals: { type: 'array', maxItems: 8, items: { type: 'string', enum: Array.from(VALID_SEMANTIC_SIGNALS) } },
+    evidence: { type: 'array', maxItems: 6, items: { type: 'string' } },
+    suspiciousPhrases: { type: 'array', maxItems: 6, items: { type: 'string' } },
+    recommendation: { type: 'string', enum: ['SAFE', 'CAUTION', 'WARNING', 'DANGEROUS'] }
+  }
+};
+
 const ALLOWED_TOP_LEVEL = new Set([
   'status',
   'language',
@@ -90,7 +109,8 @@ export class LocalAIThreatClassifier {
 
   buildPrompt(input = {}) {
     const normalized = this.normalizeInput(input);
-    const content = normalized.content.slice(0, 5000);
+    const contentLimit = normalized.inputType === 'MESSAGE' ? 1500 : 5000;
+    const content = normalized.content.slice(0, contentLimit);
     const payload = {
       inputType: normalized.inputType,
       sourceUrl: normalized.sourceUrl,
@@ -226,7 +246,10 @@ Return JSON with exactly these fields:
         throw new Error('Gemini Nano session API is unavailable');
       }
 
-      const response = await session.prompt(this.buildPrompt(input));
+      const response = await session.prompt(this.buildPrompt(input), {
+        responseConstraint: THREAT_RESPONSE_SCHEMA,
+        omitResponseConstraintInput: true
+      });
       const parsed = extractJsonObject(response);
       const validated = this.validate(parsed);
       if (!validated.ok) {

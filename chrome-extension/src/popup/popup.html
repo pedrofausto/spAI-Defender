@@ -7,187 +7,137 @@
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-  <div class="container">
-    <!-- Header -->
-    <header class="header">
-      <h1 class="title">spAI-Defender</h1>
-      <p class="subtitle">AI-Powered Tab Reader</p>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <h1>spAI-Defender</h1>
+        <p id="tabContext" class="target">Loading current tab...</p>
+      </div>
+      <div class="ai-chip" id="aiChip">
+        <span class="status-dot" id="statusIcon" aria-hidden="true"></span>
+        <span id="aiStatus">Checking</span>
+      </div>
     </header>
 
-    <!-- AI Status -->
-    <section class="status-section">
-      <div class="status-card">
-        <div class="status-icon" id="statusIcon">⚙️</div>
-        <div class="status-info">
-          <span class="status-label">AI Status:</span>
-          <span class="status-value" id="aiStatus">Checking...</span>
+    <section class="analysis-state" aria-live="polite">
+      <span id="progressLabel">Preparing local analysis</span>
+      <span id="progressValue">0%</span>
+      <div class="progress-track"><div id="progressFill"></div></div>
+    </section>
+
+    <section class="risk-panel" id="riskPanel" data-level="unknown">
+      <div class="risk-score-block">
+        <span class="eyebrow" data-i18n="currentRisk">Current risk</span>
+        <strong id="riskScore">--</strong>
+        <span id="riskLevel">UNKNOWN</span>
+      </div>
+      <div class="risk-summary">
+        <div class="risk-headline">
+          <strong id="classification">Awaiting analysis</strong>
+          <span class="state-pill" id="analysisStatus">PENDING</span>
+        </div>
+        <p id="recommendation">Content remains local while Gemini Nano evaluates the active tab.</p>
+        <div class="confidence-row">
+          <span data-i18n="confidence">Confidence</span>
+          <div class="confidence-track"><div id="confidenceFill"></div></div>
+          <strong id="confidenceValue">--</strong>
         </div>
       </div>
     </section>
 
-    <!-- Security Dashboard -->
-    <section class="dashboard-section" id="dashboardSection">
-      <div class="security-stats">
-        <div class="stat-card risk-level">
-          <span class="stat-label">Current Risk</span>
-          <span class="stat-value" id="riskScore">-</span>
-          <div class="risk-bar">
-            <div class="risk-fill" id="riskFill"></div>
-          </div>
-        </div>
-        <div class="stat-card threats-blocked">
-          <span class="stat-label">Threats Found</span>
-          <span class="stat-value" id="threatsCount">0</span>
-        </div>
-        <div class="stat-card pages-analyzed">
-          <span class="stat-label">Pages Analyzed</span>
-          <span class="stat-value" id="pagesCount">0</span>
-        </div>
+    <section class="pipeline" aria-label="Analysis pipeline">
+      <div class="pipeline-step" id="stepExtract"><span>1</span><div><strong data-i18n="extract">Extract</strong><small>Pending</small></div></div>
+      <div class="pipeline-step" id="stepRisk"><span>2</span><div><strong data-i18n="risk">Risk</strong><small>Pending</small></div></div>
+      <div class="pipeline-step" id="stepSentiment"><span>3</span><div><strong data-i18n="language">Language</strong><small>Pending</small></div></div>
+      <div class="pipeline-step" id="stepSummary"><span>4</span><div><strong data-i18n="summary">Summary</strong><small>Pending</small></div></div>
+    </section>
+
+    <section class="kpi-grid" aria-label="Local security metrics">
+      <div><span data-i18n="analyses7d">Analyses · 7d</span><strong id="metricAnalyses">--</strong></div>
+      <div><span data-i18n="malicious">Malicious</span><strong id="metricMalicious">--</strong></div>
+      <div><span data-i18n="inconclusive">Inconclusive</span><strong id="metricInconclusive">--</strong></div>
+      <div><span data-i18n="avgRisk">Avg. risk</span><strong id="metricAvgRisk">--</strong></div>
+      <div><span data-i18n="avgLatency">Avg. latency</span><strong id="metricLatency">--</strong></div>
+      <div><span data-i18n="trend24h">24h trend</span><strong id="metricTrend">--</strong></div>
+    </section>
+
+    <section class="evidence-section">
+      <div class="section-heading">
+        <h2 data-i18n="evidence">Observed evidence</h2>
+        <span id="evidenceCount">0</span>
+      </div>
+      <div id="signalChips" class="signal-chips"></div>
+      <ul id="evidenceList" class="evidence-list">
+        <li data-i18n="awaitingEvidence">Awaiting validated evidence.</li>
+      </ul>
+    </section>
+
+    <details class="detail-section" open>
+      <summary data-i18n="contentMetrics">Content metrics</summary>
+      <dl class="metric-list">
+        <div><dt data-i18n="platform">Platform</dt><dd id="contentPlatform">--</dd></div>
+        <div><dt data-i18n="languageDetected">Language</dt><dd id="contentLanguage">--</dd></div>
+        <div><dt data-i18n="words">Words</dt><dd id="contentWords">--</dd></div>
+        <div><dt data-i18n="visibleMessages">Visible messages</dt><dd id="contentMessages">--</dd></div>
+        <div><dt data-i18n="links">Links</dt><dd id="contentLinks">--</dd></div>
+        <div><dt data-i18n="forms">Forms</dt><dd id="contentForms">--</dd></div>
+      </dl>
+    </details>
+
+    <details class="detail-section">
+      <summary data-i18n="executiveSummary">Executive summary</summary>
+      <p id="summaryContent" class="detail-copy">Pending local analysis.</p>
+    </details>
+
+    <details class="detail-section">
+      <summary data-i18n="emotionalProfile">Emotional profile</summary>
+      <dl class="metric-list">
+        <div><dt>Valence</dt><dd id="valenceValue">--</dd></div>
+        <div><dt>Arousal</dt><dd id="arousalValue">--</dd></div>
+        <div><dt>Dominance</dt><dd id="dominanceValue">--</dd></div>
+        <div><dt data-i18n="urgency">Urgency</dt><dd id="urgencyValue">--</dd></div>
+        <div><dt data-i18n="manipulation">Manipulation</dt><dd id="manipulationValue">--</dd></div>
+        <div><dt data-i18n="trust">Trust</dt><dd id="trustValue">--</dd></div>
+      </dl>
+    </details>
+
+    <details class="detail-section">
+      <summary data-i18n="history">Local history</summary>
+      <div id="riskDistribution" class="distribution"></div>
+      <p id="historyStatus" class="detail-copy"></p>
+      <div class="section-heading"><h2 data-i18n="recentChats">Recent chats</h2></div>
+      <div id="chatHistoryList" class="chat-history-list"></div>
+      <div class="section-heading"><h2 data-i18n="dangerousChats">Most dangerous chats</h2></div>
+      <div id="dangerousChatList" class="chat-history-list"></div>
+    </details>
+
+    <section class="actions">
+      <button id="reanalyzeBtn" class="primary-action" type="button"><span aria-hidden="true">↻</span><span data-i18n="reanalyze">Reanalyze</span></button>
+      <button id="moreBtn" class="icon-action" type="button" aria-label="More actions" aria-expanded="false">⋯</button>
+      <div id="moreMenu" class="action-menu" hidden>
+        <button id="extractBtn" type="button" data-i18n="extractAgain">Extract again</button>
+        <button id="customPromptBtn" type="button" data-i18n="customPrompt">Custom prompt</button>
+        <button id="technicalBtn" type="button" data-i18n="technicalDetails">Technical details</button>
       </div>
     </section>
 
-    <!-- Tab Information -->
-    <section class="tab-section">
-      <h2 class="section-title">Current Tab</h2>
-      <div class="tab-info">
-        <div class="tab-title" id="tabTitle">Loading...</div>
-        <div class="tab-url" id="tabUrl">-</div>
+    <section id="promptSection" class="prompt-panel" hidden>
+      <label for="promptInput" data-i18n="customPrompt">Custom prompt</label>
+      <textarea id="promptInput" rows="3"></textarea>
+      <div>
+        <button id="cancelPromptBtn" type="button" data-i18n="cancel">Cancel</button>
+        <button id="sendPromptBtn" type="button" data-i18n="send">Send</button>
       </div>
     </section>
 
-    <!-- Actions -->
-    <section class="actions-section">
-      <h2 class="section-title">Actions</h2>
-
-      <div class="action-buttons">
-        <button class="btn btn-primary" id="extractBtn">
-          <span class="btn-icon">📄</span>
-          Extract Content
-        </button>
-
-        <button class="btn btn-secondary" id="summarizeBtn" disabled>
-          <span class="btn-icon">📝</span>
-          Summarize Page
-        </button>
-
-        <button class="btn btn-secondary" id="analyzeBtn" disabled>
-          <span class="btn-icon">🔍</span>
-          Analyze Content
-        </button>
-
-        <button class="btn btn-tertiary" id="customPromptBtn" disabled>
-          <span class="btn-icon">💬</span>
-          Custom Prompt
-        </button>
-
-        <button class="btn btn-primary" id="phishingScanBtn" disabled>
-          <span class="btn-icon">🛡️</span>
-          Scan for Phishing
-        </button>
-
-        <button class="btn btn-secondary" id="sentimentBtn" disabled>
-          <span class="btn-icon">😊</span>
-          Sentiment Analysis
-        </button>
-      </div>
+    <section id="technicalSection" class="technical-panel" hidden>
+      <div class="section-heading"><h2 data-i18n="technicalDetails">Technical details</h2><button id="closeTechnicalBtn" type="button" aria-label="Close">×</button></div>
+      <pre id="technicalContent"></pre>
     </section>
 
-    <!-- Custom Prompt Area (Hidden by default) -->
-    <section class="prompt-section" id="promptSection" style="display: none;">
-      <h3 class="section-subtitle">Custom Prompt</h3>
-      <textarea
-        class="prompt-input"
-        id="promptInput"
-        placeholder="Enter your custom prompt here..."
-        rows="3"
-      ></textarea>
-      <div class="prompt-actions">
-        <button class="btn btn-small btn-primary" id="sendPromptBtn">Send</button>
-        <button class="btn btn-small btn-tertiary" id="cancelPromptBtn">Cancel</button>
-      </div>
-    </section>
-
-    <!-- Results Area -->
-    <section class="results-section" id="resultsSection" style="display: none;">
-      <div class="results-header">
-        <h2 class="section-title">Results</h2>
-        <button class="btn-icon-only" id="clearResultsBtn" title="Clear results">✖️</button>
-      </div>
-      <div class="results-content" id="resultsContent">
-        <!-- Results will be displayed here -->
-      </div>
-    </section>
-
-    <!-- Advanced Metrics (Hidden by default) -->
-    <section class="advanced-metrics" id="advancedMetrics" style="display: none;">
-      <div class="metrics-header">
-        <h3 class="section-subtitle">Advanced Analysis</h3>
-        <button class="btn-icon-only" id="closeMetricsBtn">✖️</button>
-      </div>
-      
-      <!-- VAD Profile -->
-      <div class="metric-group" id="vadGroup">
-        <h4 class="metric-title">Emotional Profile (VAD)</h4>
-        <div class="vad-display">
-          <div class="vad-dimension">
-            <span class="vad-label">Valence:</span>
-            <div class="vad-bar" id="valenceBar">
-              <div class="vad-fill" id="valenceFill"></div>
-            </div>
-            <span class="vad-value" id="valenceValue">0</span>
-          </div>
-          <div class="vad-dimension">
-            <span class="vad-label">Arousal:</span>
-            <div class="vad-bar" id="arousalBar">
-              <div class="vad-fill" id="arousalFill"></div>
-            </div>
-            <span class="vad-value" id="arousalValue">0</span>
-          </div>
-          <div class="vad-dimension">
-            <span class="vad-label">Dominance:</span>
-            <div class="vad-bar" id="dominanceBar">
-              <div class="vad-fill" id="dominanceFill"></div>
-            </div>
-            <span class="vad-value" id="dominanceValue">0</span>
-          </div>
-        </div>
-        <div class="emotional-state" id="emotionalState"></div>
-      </div>
-
-      <!-- Lexicon Scores -->
-      <div class="metric-group" id="lexiconGroup">
-        <h4 class="metric-title">Dominant Lexicons</h4>
-        <div class="lexicon-scores" id="lexiconScores"></div>
-      </div>
-
-      <!-- Linguistic Features -->
-      <div class="metric-group" id="linguisticGroup">
-        <h4 class="metric-title">Linguistic Anomalies</h4>
-        <div class="anomalies-list" id="anomaliesList"></div>
-      </div>
-
-      <!-- Confidence Scores -->
-      <div class="metric-group" id="confidenceGroup">
-        <h4 class="metric-title">Confidence Breakdown</h4>
-        <div class="confidence-scores" id="confidenceScores"></div>
-      </div>
-    </section>
-
-    <!-- Loading Indicator -->
-    <div class="loading-overlay" id="loadingOverlay" style="display: none;">
-      <div class="loading-spinner"></div>
-      <p class="loading-text">Processing...</p>
-    </div>
-
-    <!-- Footer -->
-    <footer class="footer">
-      <div class="footer-links">
-        <a href="#" id="helpLink" class="footer-link">Help</a>
-        <a href="#" id="aboutLink" class="footer-link">About</a>
-      </div>
-    </footer>
-  </div>
-
+    <div id="notice" class="notice" role="status" hidden></div>
+  </main>
   <script type="module" src="popup.js"></script>
 </body>
 </html>
+

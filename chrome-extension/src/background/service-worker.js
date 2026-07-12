@@ -12,6 +12,7 @@ import { WhatsAppReader } from '../utils/whatsapp-reader.js';
 import { TelegramReader } from '../utils/telegram-reader.js';
 import { collectAIDiagnostics } from '../utils/ai-diagnostics.js';
 import { AnalysisCache } from '../utils/analysis-cache.js';
+import { getAnalysisMetrics, recordAnalysisEvent } from '../utils/analysis-metrics-store.js';
 
 const aiManager = new AIOffscreenProxy();
 const phishingDetector = new PhishingDetector(aiManager);
@@ -46,6 +47,51 @@ function cacheResult(key, result) {
   console.log(`💾 Cached analysis result (cache size: ${analysisCache.size()}/50)`);
 }
 
+const CONTENT_SCRIPT_FILE = 'src/content/content-script.js';
+const CONTENT_SCRIPT_PING = { type: 'SPAI_PING' };
+
+function isInjectableTabUrl(url = '') {
+  return /^https?:\/\//i.test(String(url || ''));
+}
+
+async function hasResponsiveContentScript(tabId) {
+  if (!tabId) return false;
+  try {
+    const response = await chrome.tabs.sendMessage(tabId, CONTENT_SCRIPT_PING);
+    return Boolean(response?.success && response?.ready);
+  } catch (_) {
+    return false;
+  }
+}
+
+async function ensureContentScriptInjected(tabId, url = '') {
+  if (!tabId || !isInjectableTabUrl(url)) {
+    return { ok: false, reason: 'unsupported_tab' };
+  }
+
+  if (await hasResponsiveContentScript(tabId)) {
+    return { ok: true, injected: false, reason: 'already_ready' };
+  }
+
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: [CONTENT_SCRIPT_FILE]
+    });
+    return { ok: true, injected: true, reason: 'injected' };
+  } catch (error) {
+    console.warn('Failed to inject content script into tab:', tabId, error?.message || error);
+    return { ok: false, reason: error?.message || String(error) };
+  }
+}
+
+async function ensureContentScriptsForOpenTabs() {
+  const tabs = await chrome.tabs.query({});
+  for (const tab of tabs) {
+    await ensureContentScriptInjected(tab?.id, tab?.url || '');
+  }
+}
+
 // Extension installation and updates
 chrome.runtime.onInstalled.addListener(async (details) => {
   console.log('spAI-Defender installed:', details.reason);
@@ -58,6 +104,10 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   await chrome.storage.local.set({
     aiAvailability: availability,
     installedAt: new Date().toISOString()
+  });
+
+  await ensureContentScriptsForOpenTabs().catch(error => {
+    console.warn('Open-tab content script refresh failed:', error?.message || error);
   });
 });
 
@@ -142,6 +192,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       handleGetLastWhatsAppSnapshot(sendResponse);
       return true; // Async response
 
+    case 'GET_WHATSAPP_CHAT_HISTORY':
+      handleGetWhatsAppChatHistory(sendResponse);
+      return true; // Async response
+
+    case 'FORCE_WHATSAPP_REANALYSIS':
+      handleForceWhatsAppReanalysis(request.tabId, sendResponse);
+      return true; // Async response
+
     default:
       sendResponse({ error: 'Unknown message type' });
       return false;
@@ -202,6 +260,27 @@ async function handleRunAIDiagnostics(sendResponse) {
 /**
  * Get content from a specific tab
  */
+async function handleForceWhatsAppReanalysis(tabId, sendResponse) {
+  try {
+    if (!tabId) {
+      const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      tabId = activeTab?.id;
+    }
+    if (!tabId) {
+      sendResponse({ success: false, error: 'No active tab available' });
+      return;
+    }
+
+    const tab = await chrome.tabs.get(tabId);
+    await ensureContentScriptInjected(tabId, tab?.url || '');
+    const response = await chrome.tabs.sendMessage(tabId, { type: 'FORCE_REANALYZE_VISIBLE_MESSAGES' });
+    sendResponse(response || { success: false, error: 'No response from content script' });
+  } catch (error) {
+    console.error('Error forcing WhatsApp reanalysis:', error);
+    sendResponse({ success: false, error: error.message });
+  }
+}
+
 async function handleGetTabContent(tabId, sendResponse) {
   try {
     // If no tabId specified, use active tab
@@ -213,6 +292,8 @@ async function handleGetTabContent(tabId, sendResponse) {
     // Get tab info to check URL
     const tab = await chrome.tabs.get(tabId);
     console.log('Extracting content for tab:', tabId, tab.url);
+
+    await ensureContentScriptInjected(tabId, tab?.url || '');
 
     // Get the content via message from content script (preferred)
     try {
@@ -485,14 +566,61 @@ function extractWhatsAppContentDirect() {
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === 'complete') {
     console.log('Tab updated:', tab.url);
-    // Could trigger automatic analysis here if needed
+    ensureContentScriptInjected(tabId, tab?.url || '').catch(error => {
+      console.warn('Tab content script refresh failed:', error?.message || error);
+    });
+  }
+});
+
+chrome.tabs.onActivated.addListener(async ({ tabId }) => {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    await ensureContentScriptInjected(tabId, tab?.url || '');
+  } catch (error) {
+    console.warn('Active-tab content script refresh failed:', error?.message || error);
   }
 });
 
 /**
  * Handle phishing detection (includes image analysis)
  */
+function inferAnalysisPlatform(data = {}) {
+  const explicit = String(data.platform || '').toUpperCase();
+  if (['WEB', 'WHATSAPP', 'TELEGRAM', 'GMAIL', 'OUTLOOK'].includes(explicit)) return explicit;
+  const url = String(data.url || '');
+  if (url.includes('web.whatsapp.com')) return 'WHATSAPP';
+  if (url.includes('web.telegram.org')) return 'TELEGRAM';
+  if (url.includes('mail.google.com')) return 'GMAIL';
+  if (url.includes('outlook.')) return 'OUTLOOK';
+  return 'WEB';
+}
+
+async function recordPhishingMetric(data, analysis, startedAt, statusOverride = null) {
+  const classification = analysis?.classification || (analysis?.isPhishing ? 'PHISHING' : 'UNKNOWN');
+  const status = statusOverride || analysis?.status ||
+    (classification === 'INCONCLUSIVE' || analysis?.riskLevel === 'UNKNOWN' ? 'INCONCLUSIVE' : 'VALID');
+  try {
+    await recordAnalysisEvent({
+      platform: inferAnalysisPlatform(data),
+      classification,
+      riskLevel: analysis?.riskLevel || 'UNKNOWN',
+      status,
+      riskScore: analysis?.finalRiskScore ?? analysis?.riskScore ?? 0,
+      confidence: analysis?.confidence ?? 0,
+      latencyMs: Date.now() - startedAt,
+      signalCount: Array.isArray(analysis?.semanticSignals) ? analysis.semanticSignals.length : 0,
+      evidenceCount: Array.isArray(analysis?.evidence)
+        ? analysis.evidence.length
+        : (Array.isArray(analysis?.redFlags) ? analysis.redFlags.length : 0),
+      engine: String(analysis?.detectionMethod || '').includes('gemini') ? 'gemini_nano' : 'unknown'
+    });
+  } catch (error) {
+    console.warn('Analysis metric recording failed:', error?.message || error);
+  }
+}
+
 async function handlePhishingDetection(data, sendResponse) {
+  const startedAt = Date.now();
   console.log('🔵 handlePhishingDetection called with data:', data?.content?.substring(0, 50) || 'no content');
   try {
     // Extract content properly - data has {url, text, title, images}
@@ -514,6 +642,7 @@ async function handlePhishingDetection(data, sendResponse) {
 
     if (cachedResult) {
       console.log('📦 Using cached analysis result - reducing IDLE time');
+      await recordPhishingMetric(data, cachedResult.analysis, startedAt);
       sendResponse(cachedResult);
       return;
     }
@@ -549,10 +678,12 @@ async function handlePhishingDetection(data, sendResponse) {
     
     // Cache the result for future requests
     cacheResult(cacheKey, response);
+    await recordPhishingMetric(data, analysis, startedAt);
     
     sendResponse(response);
   } catch (error) {
     console.error('Error in phishing detection:', error);
+    await recordPhishingMetric(data, { classification: 'UNKNOWN', riskLevel: 'UNKNOWN' }, startedAt, 'FAILED');
     sendResponse({
       success: false,
       error: error.message
@@ -631,11 +762,14 @@ async function handleGetPlatformInfo(url, sendResponse) {
  */
 async function handleGetThreatStats(sendResponse) {
   try {
-    const stats = await phishingDetector.getThreatStats();
-    
+    const [legacyStats, dashboard] = await Promise.all([
+      phishingDetector.getThreatStats(),
+      getAnalysisMetrics()
+    ]);
+
     sendResponse({
       success: true,
-      stats
+      stats: { ...legacyStats, dashboard }
     });
   } catch (error) {
     console.error('Error getting threat stats:', error);
@@ -870,10 +1004,82 @@ async function handleAnalyzeMessagesPhishing(data, sendResponse) {
 /**
  * Handle WhatsApp chat snapshot storage
  */
+const WHATSAPP_CHAT_HISTORY_KEY = 'whatsAppChatHistory';
+const MAX_WHATSAPP_CHAT_HISTORY = 10;
+const MAX_WHATSAPP_CHAT_HISTORY_STORAGE = 20;
+
+function getWhatsAppChatEntryId(entry) {
+  return entry.chatId || `${entry.tabId}:${entry.chatName}`;
+}
+
+function normalizeWhatsAppChatHistoryEntry(snapshot, previousEntry = null) {
+  const summary = snapshot.analysisSummary || {};
+  const stats = snapshot.content?.stats || {};
+  const currentRiskScore = Number(summary.maxRiskScore || 0);
+  const currentSeverity = summary.maxSeverity || 'low';
+  const historicalMaxRiskScore = Math.max(Number(previousEntry?.historicalMaxRiskScore || 0), currentRiskScore);
+  const historicalSeverity = historicalMaxRiskScore >= 75 ? 'high' : historicalMaxRiskScore >= 45 ? 'medium' : 'low';
+  return {
+    tabId: snapshot.tabId,
+    chatId: snapshot.chatId || null,
+    chatName: snapshot.chatName || 'Unknown Chat',
+    updatedAt: snapshot.receivedAt,
+    trigger: snapshot.trigger,
+    maxRiskScore: currentRiskScore,
+    severity: currentSeverity,
+    highlightedHigh: Number(summary.highlightedHigh || 0),
+    highlightedMedium: Number(summary.highlightedMedium || 0),
+    visibleMessages: Number(stats.paragraphCount || 0),
+    links: Number(stats.linkCount || 0),
+    historicalMaxRiskScore,
+    historicalSeverity,
+    observations: Math.max(Number(previousEntry?.observations || 0), 0) + 1
+  };
+}
+
+function mergeWhatsAppChatHistory(existingEntries = [], snapshot) {
+  const snapshotId = snapshot.chatId || `${snapshot.tabId}:${snapshot.chatName}`;
+  const previousEntry = existingEntries.find(entry => getWhatsAppChatEntryId(entry) === snapshotId) || null;
+  const nextEntry = normalizeWhatsAppChatHistoryEntry(snapshot, previousEntry);
+  const filtered = existingEntries.filter(entry => getWhatsAppChatEntryId(entry) !== snapshotId);
+  return [nextEntry, ...filtered];
+}
+
+function buildWhatsAppChatHistoryViews(entries = []) {
+  const recentChats = [...entries]
+    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+    .slice(0, MAX_WHATSAPP_CHAT_HISTORY);
+  const dangerousChats = [...entries]
+    .sort((a, b) => {
+      if (Number(b.historicalMaxRiskScore || 0) !== Number(a.historicalMaxRiskScore || 0)) {
+        return Number(b.historicalMaxRiskScore || 0) - Number(a.historicalMaxRiskScore || 0);
+      }
+      return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+    })
+    .slice(0, MAX_WHATSAPP_CHAT_HISTORY);
+  return { recentChats, dangerousChats };
+}
+
+function trimWhatsAppChatHistory(entries = []) {
+  const { recentChats, dangerousChats } = buildWhatsAppChatHistoryViews(entries);
+  const merged = [];
+  const seen = new Set();
+
+  for (const entry of [...recentChats, ...dangerousChats]) {
+    const id = getWhatsAppChatEntryId(entry);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    merged.push(entry);
+    if (merged.length >= MAX_WHATSAPP_CHAT_HISTORY_STORAGE) break;
+  }
+
+  return merged;
+}
+
 async function handleWhatsAppChatSnapshot(data, sender, sendResponse) {
   try {
     const tabId = sender?.tab?.id || null;
-    
+
     if (!tabId) {
       console.warn('WhatsApp snapshot received without tab ID');
       sendResponse({ success: false, error: 'No tab ID' });
@@ -886,17 +1092,22 @@ async function handleWhatsAppChatSnapshot(data, sender, sendResponse) {
       trigger: data.trigger,
       chatId: data.chatId,
       chatName: data.chatName,
+      analysisSummary: data.analysisSummary || null,
       content: data.content
     };
 
-    // Store in chrome.storage.local
+    const existing = await chrome.storage.local.get([WHATSAPP_CHAT_HISTORY_KEY]);
+    const mergedHistory = mergeWhatsAppChatHistory(existing[WHATSAPP_CHAT_HISTORY_KEY] || [], snapshot);
+    const { recentChats, dangerousChats } = buildWhatsAppChatHistoryViews(mergedHistory);
+    const retainedHistory = trimWhatsAppChatHistory(mergedHistory);
+
     await chrome.storage.local.set({
-      lastWhatsAppSnapshot: snapshot
+      lastWhatsAppSnapshot: snapshot,
+      [WHATSAPP_CHAT_HISTORY_KEY]: retainedHistory
     });
 
     console.log(`✅ WhatsApp snapshot stored (trigger: ${data.trigger}, chat: ${data.chatName})`);
-    
-    sendResponse({ success: true });
+    sendResponse({ success: true, historySize: recentChats.length, dangerousSize: dangerousChats.length });
   } catch (error) {
     console.error('Error storing WhatsApp snapshot:', error);
     sendResponse({
@@ -912,7 +1123,7 @@ async function handleWhatsAppChatSnapshot(data, sender, sendResponse) {
 async function handleGetLastWhatsAppSnapshot(sendResponse) {
   try {
     const result = await chrome.storage.local.get('lastWhatsAppSnapshot');
-    
+
     if (result.lastWhatsAppSnapshot) {
       sendResponse({
         success: true,
@@ -933,4 +1144,22 @@ async function handleGetLastWhatsAppSnapshot(sendResponse) {
   }
 }
 
+async function handleGetWhatsAppChatHistory(sendResponse) {
+  try {
+    const result = await chrome.storage.local.get([WHATSAPP_CHAT_HISTORY_KEY]);
+    const chats = result[WHATSAPP_CHAT_HISTORY_KEY] || [];
+    const { recentChats, dangerousChats } = buildWhatsAppChatHistoryViews(chats);
+    sendResponse({ success: true, chats: recentChats, recentChats, dangerousChats });
+  } catch (error) {
+    console.error('Error retrieving WhatsApp chat history:', error);
+    sendResponse({ success: false, error: error.message, chats: [], recentChats: [], dangerousChats: [] });
+  }
+}
 console.log('spAI-Defender service worker loaded');
+
+
+
+
+
+
+

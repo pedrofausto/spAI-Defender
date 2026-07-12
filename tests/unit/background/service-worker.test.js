@@ -3,7 +3,7 @@
  */
 
 function setupBackgroundChrome() {
-  const listeners = { message: null, installed: null, updated: null };
+  const listeners = { message: null, installed: null, updated: null, activated: null };
   global.chrome = {
     runtime: {
       onInstalled: { addListener: jest.fn((listener) => { listeners.installed = listener; }) },
@@ -14,11 +14,20 @@ function setupBackgroundChrome() {
     tabs: {
       query: jest.fn().mockResolvedValue([{ id: 11, url: 'https://example.test', title: 'Example' }]),
       get: jest.fn().mockResolvedValue({ id: 11, url: 'https://example.test', title: 'Example' }),
-      sendMessage: jest.fn().mockResolvedValue({
-        success: true,
-        content: { title: 'Page', bodyText: 'Body', url: 'https://example.test' }
+      sendMessage: jest.fn().mockImplementation(async (_tabId, message) => {
+        if (message?.type === 'SPAI_PING') {
+          return { success: true, ready: true };
+        }
+        if (message?.type === 'FORCE_REANALYZE_VISIBLE_MESSAGES') {
+          return { success: true, queued: false, visibleMessages: 3 };
+        }
+        return {
+          success: true,
+          content: { title: 'Page', bodyText: 'Body', url: 'https://example.test' }
+        };
       }),
-      onUpdated: { addListener: jest.fn((listener) => { listeners.updated = listener; }) }
+      onUpdated: { addListener: jest.fn((listener) => { listeners.updated = listener; }) },
+      onActivated: { addListener: jest.fn((listener) => { listeners.activated = listener; }) }
     },
     scripting: {
       executeScript: jest.fn().mockResolvedValue([{ result: { title: 'Injected', bodyText: 'Injected body' } }])
@@ -67,6 +76,7 @@ describe('background service worker message routing', () => {
     expect(chrome.runtime.onInstalled.addListener).toHaveBeenCalledWith(expect.any(Function));
     expect(chrome.runtime.onMessage.addListener).toHaveBeenCalledWith(expect.any(Function));
     expect(chrome.tabs.onUpdated.addListener).toHaveBeenCalledWith(expect.any(Function));
+    expect(chrome.tabs.onActivated.addListener).toHaveBeenCalledWith(expect.any(Function));
 
     const result = await sendRuntimeMessage(listeners.message, { type: 'UNKNOWN_TYPE' });
 
@@ -102,14 +112,72 @@ describe('background service worker message routing', () => {
     expect(chrome.scripting.executeScript).not.toHaveBeenCalled();
   });
 
-  test('falls back to injected extraction when content script messaging fails', async () => {
+    test('falls back to injected extraction when content script messaging fails', async () => {
     const listeners = await importBackground();
-    chrome.tabs.sendMessage.mockRejectedValueOnce(new Error('no receiver'));
+    chrome.tabs.sendMessage.mockImplementation(async (_tabId, message) => {
+      if (message?.type === 'SPAI_PING') {
+        return { success: true, ready: true };
+      }
+      if (message?.type === 'EXTRACT_CONTENT') {
+        throw new Error('no receiver');
+      }
+      return { success: true };
+    });
 
     const result = await sendRuntimeMessage(listeners.message, { type: 'GET_TAB_CONTENT', tabId: 11 });
 
     expect(result.response).toMatchObject({ success: true, content: { title: 'Injected' } });
     expect(chrome.scripting.executeScript).toHaveBeenCalledWith(expect.objectContaining({ target: { tabId: 11 }, func: expect.any(Function) }));
+  });
+
+  test('injects the content script into already-open supported tabs on install when ping fails', async () => {
+    const listeners = await importBackground();
+    chrome.tabs.query.mockResolvedValueOnce([
+      { id: 21, url: 'https://web.whatsapp.com/', title: 'WhatsApp' },
+      { id: 22, url: 'chrome://extensions/', title: 'Extensions' }
+    ]);
+    chrome.tabs.sendMessage.mockImplementation(async (_tabId, message) => {
+      if (message?.type === 'SPAI_PING') {
+        throw new Error('Receiving end does not exist.');
+      }
+      return { success: true };
+    });
+
+    await listeners.installed({ reason: 'update' });
+
+    expect(chrome.scripting.executeScript).toHaveBeenCalledWith({
+      target: { tabId: 21 },
+      files: ['src/content/content-script.js']
+    });
+    expect(chrome.scripting.executeScript).not.toHaveBeenCalledWith(expect.objectContaining({ target: { tabId: 22 } }));
+  });
+
+  test('refreshes the content script on supported tab completion when ping fails', async () => {
+    const listeners = await importBackground();
+    chrome.tabs.sendMessage.mockImplementation(async (_tabId, message) => {
+      if (message?.type === 'SPAI_PING') {
+        throw new Error('Receiving end does not exist.');
+      }
+      return { success: true };
+    });
+
+    listeners.updated(31, { status: 'complete' }, { id: 31, url: 'https://web.whatsapp.com/' });
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(chrome.scripting.executeScript).toHaveBeenCalledWith({
+      target: { tabId: 31 },
+      files: ['src/content/content-script.js']
+    });
+  });
+
+  test('forces visible WhatsApp reanalysis through the content script', async () => {
+    const listeners = await importBackground();
+    chrome.tabs.get.mockResolvedValueOnce({ id: 44, url: 'https://web.whatsapp.com/', title: 'WhatsApp' });
+
+    const result = await sendRuntimeMessage(listeners.message, { type: 'FORCE_WHATSAPP_REANALYSIS', tabId: 44 });
+
+    expect(result.response).toEqual({ success: true, queued: false, visibleMessages: 3 });
+    expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(44, { type: 'FORCE_REANALYZE_VISIBLE_MESSAGES' });
   });
 
   test('stores and retrieves WhatsApp snapshots only when sender has a tab id', async () => {
@@ -123,17 +191,22 @@ describe('background service worker message routing', () => {
 
     const stored = await sendRuntimeMessage(
       listeners.message,
-      { type: 'WHATSAPP_CHAT_SNAPSHOT', data: { trigger: 'manual', chatId: 'c1', chatName: 'Chat', content: { bodyText: 'hello' } } },
+      { type: 'WHATSAPP_CHAT_SNAPSHOT', data: { trigger: 'manual', chatId: 'c1', chatName: 'Chat', analysisSummary: { maxRiskScore: 88, maxSeverity: 'high', highlightedHigh: 1, highlightedMedium: 0 }, content: { bodyText: 'hello', stats: { paragraphCount: 1, linkCount: 0 } } } },
       { tab: { id: 22 } }
     );
-    expect(stored.response).toEqual({ success: true });
-    expect(chrome.storage.local.set).toHaveBeenCalledWith({
-      lastWhatsAppSnapshot: expect.objectContaining({ tabId: 22, chatName: 'Chat', content: { bodyText: 'hello' } })
-    });
+    expect(stored.response).toEqual({ success: true, historySize: 1, dangerousSize: 1 });
+    expect(chrome.storage.local.set).toHaveBeenCalledWith(expect.objectContaining({
+      lastWhatsAppSnapshot: expect.objectContaining({ tabId: 22, chatName: 'Chat', analysisSummary: expect.objectContaining({ maxRiskScore: 88 }) }),
+      whatsAppChatHistory: [expect.objectContaining({ chatName: 'Chat', severity: 'high', maxRiskScore: 88, historicalMaxRiskScore: 88, visibleMessages: 1 })]
+    }));
 
     chrome.storage.local.get.mockResolvedValueOnce({ lastWhatsAppSnapshot: { tabId: 22, content: { bodyText: 'hello' } } });
     const retrieved = await sendRuntimeMessage(listeners.message, { type: 'GET_LAST_WHATSAPP_SNAPSHOT' });
     expect(retrieved.response).toEqual({ success: true, snapshot: { tabId: 22, content: { bodyText: 'hello' } } });
+
+    chrome.storage.local.get.mockResolvedValueOnce({ whatsAppChatHistory: [{ chatName: 'Chat', severity: 'high', maxRiskScore: 88, historicalMaxRiskScore: 88 }] });
+    const chatHistory = await sendRuntimeMessage(listeners.message, { type: 'GET_WHATSAPP_CHAT_HISTORY' });
+    expect(chatHistory.response).toEqual({ success: true, chats: [{ chatName: 'Chat', severity: 'high', maxRiskScore: 88, historicalMaxRiskScore: 88 }], recentChats: [{ chatName: 'Chat', severity: 'high', maxRiskScore: 88, historicalMaxRiskScore: 88 }], dangerousChats: [{ chatName: 'Chat', severity: 'high', maxRiskScore: 88, historicalMaxRiskScore: 88 }] });
   });
 
   test('initializes storage on install with current AI availability', async () => {
@@ -251,3 +324,7 @@ describe('background service worker message routing', () => {
     expect(missing.response).toEqual({ success: false, error: 'No snapshot available' });
   });
 });
+
+
+
+

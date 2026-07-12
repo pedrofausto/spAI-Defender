@@ -40,6 +40,10 @@ describe('LocalAIThreatClassifier', () => {
 
     expect(aiManager.getOrCreateSession).toHaveBeenCalledWith({ temperature: 0.2 });
     expect(aiManager.session.prompt.mock.calls[0][0]).toContain('UNTRUSTED_CONTENT_START');
+    expect(aiManager.session.prompt.mock.calls[0][1]).toEqual(expect.objectContaining({
+      responseConstraint: expect.objectContaining({ type: 'object', additionalProperties: false }),
+      omitResponseConstraintInput: true
+    }));
     expect(result).toMatchObject({
       status: 'VALID',
       language: 'es',

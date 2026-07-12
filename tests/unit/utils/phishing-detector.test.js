@@ -151,6 +151,24 @@ describe('PhishingDetector', () => {
     });
   });
 
+  describe('lightweight heuristics', () => {
+    test('reduces false positives for educational warnings about phishing', () => {
+      const result = detector.quickDetect('Phishing awareness training: do not click suspicious links and never share your password.');
+      expect(result.score).toBeLessThan(25);
+      expect(result.context.educational).toBe(true);
+    });
+
+    test('raises score when credentials, urgency and links appear together', async () => {
+      mockAIManager.getOrCreateSession.mockResolvedValue({
+        prompt: jest.fn().mockResolvedValue('{"status":"VALID","language":"en","riskScore":62,"riskLevel":"MEDIUM_HIGH","confidence":80,"classification":"SUSPICIOUS","semanticSignals":["credential_request"],"evidence":["asks for verification"],"suspiciousPhrases":["verify account"],"recommendation":"WARNING"}')
+      });
+      const result = await detector.detectPhishing('https://example.test', 'Verify your account now using http://bit.ly/test and enter your password immediately', 'Alert', [], false);
+      expect(result.finalRiskScore).toBeGreaterThanOrEqual(62);
+      expect(result.semanticSignals).toEqual(expect.arrayContaining(['credential_request', 'urgent_action', 'link_action']));
+      expect(result.heuristicScore).toBeGreaterThan(0);
+    });
+  });
+
   describe('prompt injection resistance', () => {
     test('delimits untrusted page content and tells the model to ignore embedded instructions', async () => {
       const mockSession = {
@@ -438,6 +456,37 @@ describe('PhishingDetector', () => {
       expect(result).toBeDefined();
       expect(result).toHaveProperty('finalRiskScore');
       expect(result).toHaveProperty('riskLevel');
+    });
+
+
+
+    test('preserves validated Gemini classification in the hybrid response', async () => {
+      jest.spyOn(detector, '_detectPhishingSimple').mockResolvedValue({
+        status: 'VALID',
+        classification: 'PHISHING',
+        riskScore: 92,
+        riskLevel: 'HIGH',
+        confidence: 87,
+        isPhishing: true,
+        semanticSignals: ['credential_request'],
+        evidence: ['requests credentials through an external link'],
+        suspiciousPhrases: ['verify your account']
+      });
+      detector.hybridScorer.calculateHybridScore.mockReturnValue({
+        finalRiskScore: 91,
+        riskLevel: 'HIGH',
+        isPhishing: true
+      });
+
+      const result = await detector.detectPhishingAdvanced('https://example.test', 'Verify your account');
+
+      expect(result).toMatchObject({
+        status: 'VALID',
+        classification: 'PHISHING',
+        riskLevel: 'HIGH',
+        confidence: 87,
+        semanticSignals: ['credential_request']
+      });
     });
 
     test('should handle invalid content gracefully', async () => {
@@ -738,16 +787,17 @@ describe('PhishingDetector', () => {
       expect(chrome.storage.local.set).toHaveBeenCalled();
     });
 
-    test('should include URL in tracked threat', async () => {
-      const url = 'https://malicious.com';
-      await detector.trackThreat(url, {
+    test('should not persist URL or content-derived red flags', async () => {
+      await detector.trackThreat('https://malicious.com/private/path', {
         riskLevel: 'CRITICAL',
-        riskScore: 95
+        riskScore: 95,
+        redFlags: ['private message content']
       });
 
-      expect(chrome.storage.local.set).toHaveBeenCalled();
       const setCall = chrome.storage.local.set.mock.calls[0][0];
-      expect(setCall.threats[0]).toHaveProperty('url', url);
+      expect(setCall.threats[0]).toEqual(expect.objectContaining({ riskLevel: 'CRITICAL', riskScore: 95 }));
+      expect(setCall.threats[0]).not.toHaveProperty('url');
+      expect(setCall.threats[0]).not.toHaveProperty('redFlags');
     });
 
     test('should include timestamp in tracked threat', async () => {
@@ -970,3 +1020,4 @@ describe('PhishingDetector', () => {
     });
   });
 });
+

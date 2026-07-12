@@ -13,6 +13,77 @@ function textOrUnknown(element) {
   return text || 'Unknown';
 }
 
+function inferWhatsAppMessageDirection(element, bubbleElement, viewportElement = null) {
+  const directIncoming =
+    element?.hasAttribute?.('data-incoming') ||
+    bubbleElement?.hasAttribute?.('data-incoming') ||
+    element?.querySelector?.('[data-incoming]') ||
+    bubbleElement?.querySelector?.('[data-incoming]');
+  if (directIncoming) return 'in';
+
+  const directOutgoing =
+    element?.hasAttribute?.('data-outgoing') ||
+    bubbleElement?.hasAttribute?.('data-outgoing') ||
+    element?.querySelector?.('[data-outgoing]') ||
+    bubbleElement?.querySelector?.('[data-outgoing]');
+  if (directOutgoing) return 'out';
+
+  const semanticIncoming = element?.querySelector?.('.message-in') || bubbleElement?.querySelector?.('.message-in');
+  if (semanticIncoming || element?.classList?.contains('message-in') || bubbleElement?.classList?.contains('message-in')) {
+    return 'in';
+  }
+
+  const semanticOutgoing = element?.querySelector?.('.message-out') || bubbleElement?.querySelector?.('.message-out');
+  if (semanticOutgoing || element?.classList?.contains('message-out') || bubbleElement?.classList?.contains('message-out')) {
+    return 'out';
+  }
+
+  const alignmentTarget = bubbleElement?.parentElement || element?.parentElement || bubbleElement || element;
+  const win = getDocument().defaultView || globalThis;
+  if (alignmentTarget && typeof win.getComputedStyle === 'function') {
+    const style = win.getComputedStyle(alignmentTarget);
+    if (style.alignItems === 'flex-end' || style.alignSelf === 'flex-end' || style.justifyContent === 'flex-end') {
+      return 'out';
+    }
+    if (style.alignItems === 'flex-start' || style.alignSelf === 'flex-start' || style.justifyContent === 'flex-start') {
+      return 'in';
+    }
+  }
+
+  const bubbleRect = bubbleElement?.getBoundingClientRect?.() || element?.getBoundingClientRect?.();
+  const viewportRect = viewportElement?.getBoundingClientRect?.();
+  if (bubbleRect) {
+    const midpoint = viewportRect
+      ? ((viewportRect.left + viewportRect.right) / 2)
+      : (win.innerWidth / 2);
+    const center = (bubbleRect.left + bubbleRect.right) / 2;
+    return center >= midpoint ? 'out' : 'in';
+  }
+
+  return 'unknown';
+}
+
+function isElementVisibleInViewport(element, viewportElement = null) {
+  if (!element || typeof element.getBoundingClientRect !== 'function') return false;
+
+  const rect = element.getBoundingClientRect();
+  const hasLayout = rect.width > 0 || rect.height > 0 || rect.top !== 0 || rect.bottom !== 0;
+  if (!hasLayout) return true;
+
+  const viewportRect = viewportElement && typeof viewportElement.getBoundingClientRect === 'function'
+    ? viewportElement.getBoundingClientRect()
+    : null;
+  const hasViewportLayout = viewportRect &&
+    (viewportRect.width > 0 || viewportRect.height > 0 || viewportRect.top !== 0 || viewportRect.bottom !== 0);
+
+  const win = getDocument().defaultView || globalThis;
+  const top = hasViewportLayout ? viewportRect.top : 0;
+  const bottom = hasViewportLayout ? viewportRect.bottom : win.innerHeight;
+  const left = hasViewportLayout ? viewportRect.left : 0;
+  const right = hasViewportLayout ? viewportRect.right : win.innerWidth;
+
+  return rect.bottom > top && rect.top < bottom && rect.right > left && rect.left < right;
+}
 export class WhatsAppReader {
   constructor() {
     this.messageSelectors = {
@@ -47,18 +118,28 @@ export class WhatsAppReader {
       const messageElements = messageContainer.querySelectorAll(this.messageSelectors.messageBubbles);
       messageElements.forEach((element, index) => {
         try {
+          if (!isElementVisibleInViewport(element, messageContainer)) return;
+
           const textElement = element.querySelector(this.messageSelectors.messageText);
           const text = typeof textElement?.textContent === 'string' ? textElement.textContent.trim() : '';
           if (!text) return;
 
           const timeElement = element.querySelector(this.messageSelectors.messageTime);
           const timestamp = timeElement ? this.extractTimestamp(timeElement) : new Date().toISOString();
-          const isIncoming = element.hasAttribute('data-incoming');
-          const messageId = element.getAttribute('data-id') || `msg-${index}`;
+          const bubbleElement = element.querySelector('[data-testid="msg-container"]') || element;
+          const direction = inferWhatsAppMessageDirection(element, bubbleElement, messageContainer);
+          const isIncoming = direction === 'in';
+          const messageId = element.getAttribute('data-id') || bubbleElement.getAttribute?.('data-id') || `msg-${index}`;
           const senderElement = element.querySelector(this.messageSelectors.senderName);
-          const sender = senderElement ? textOrUnknown(senderElement) : (isIncoming ? 'Contact' : 'You');
+          const sender = senderElement
+            ? textOrUnknown(senderElement)
+            : direction === 'out'
+              ? 'You'
+              : direction === 'in'
+                ? 'Contact'
+                : 'Unknown';
 
-          messages.push({ id: messageId, text, sender, timestamp, isIncoming });
+          messages.push({ id: messageId, text, sender, timestamp, isIncoming, direction });
         } catch (error) {
           console.warn('Error extracting individual message:', error);
         }
@@ -225,3 +306,5 @@ export class WhatsAppReader {
 }
 
 export default WhatsAppReader;
+
+

@@ -6,6 +6,9 @@ function makeProxy() {
   proxy.availabilityChecked = true;
   proxy.aiAvailable = true;
   proxy._send = jest.fn(async (action, payload) => {
+    if (action === 'capabilities') {
+      return { available: true, availability: 'readily' };
+    }
     if (action === 'createSession') {
       return { sessionId: `session-${proxy._send.mock.calls.filter(([a]) => a === 'createSession').length}` };
     }
@@ -48,6 +51,33 @@ describe('AIOffscreenProxy session isolation', () => {
     expect(destroyCalls).not.toContain(second.sessionId);
   });
 
+
+  test('destroySession waits for the in-flight prompt before sending destroySession', async () => {
+    const proxy = makeProxy();
+    let resolvePrompt;
+    proxy._send = jest.fn((action, payload) => {
+      if (action === 'capabilities') return Promise.resolve({ available: true, availability: 'readily' });
+      if (action === 'createSession') return Promise.resolve({ sessionId: 'session-1' });
+      if (action === 'prompt') return new Promise((resolve) => { resolvePrompt = () => resolve({ sessionId: payload.sessionId, text: 'done' }); });
+      if (action === 'destroySession') return Promise.resolve(true);
+      return Promise.resolve({});
+    });
+
+    const session = await proxy.createSession();
+    const promptPromise = session.prompt('hello');
+    await Promise.resolve();
+
+    const destroyPromise = proxy.destroySession(session);
+    await Promise.resolve();
+
+    expect(proxy._send.mock.calls.filter(([action]) => action === 'destroySession')).toHaveLength(0);
+
+    resolvePrompt();
+    await expect(promptPromise).resolves.toBe('done');
+    await destroyPromise;
+
+    expect(proxy._send.mock.calls.map(([action]) => action)).toEqual(['capabilities', 'createSession', 'prompt', 'destroySession']);
+  });
   test('session proxy destroys only its own session id', async () => {
     const proxy = makeProxy();
     const first = await proxy.createSession();
@@ -111,5 +141,37 @@ describe('AIOffscreenProxy Built-in AI availability contract', () => {
 
     await expect(proxy.checkAvailability()).resolves.toBe('readily');
     expect(proxy.aiAvailable).toBe(true);
+  });
+
+  test('does not cache transient downloading availability', async () => {
+    const proxy = new AIOffscreenProxy();
+    proxy._send = jest.fn()
+      .mockResolvedValueOnce({ available: true, availability: 'downloading' })
+      .mockResolvedValueOnce({ available: true, availability: 'readily' });
+
+    await expect(proxy.checkAvailability()).resolves.toBe('downloading');
+    expect(proxy.aiAvailable).toBe(true);
+    expect(proxy.availabilityChecked).toBe(false);
+
+    await expect(proxy.checkAvailability()).resolves.toBe('readily');
+    expect(proxy._send).toHaveBeenCalledTimes(2);
+    expect(proxy.availabilityChecked).toBe(true);
+  });
+
+  test('createSession force-refreshes availability and accepts downloadable states', async () => {
+    const proxy = new AIOffscreenProxy();
+    proxy.availability = 'no';
+    proxy.availabilityChecked = true;
+    proxy._send = jest.fn(async (action) => {
+      if (action === 'capabilities') return { available: true, availability: 'downloadable' };
+      if (action === 'createSession') return { sessionId: 'session-downloadable' };
+      return {};
+    });
+
+    const session = await proxy.createSession();
+
+    expect(session.sessionId).toBe('session-downloadable');
+    expect(proxy._send.mock.calls.map(([action]) => action)).toEqual(['capabilities', 'createSession']);
+    expect(proxy.availability).toBe('readily');
   });
 });

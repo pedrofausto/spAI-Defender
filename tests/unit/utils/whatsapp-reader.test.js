@@ -52,7 +52,7 @@ describe('WhatsAppReader', () => {
       expect(result.extractedAt).toBeDefined();
     });
 
-    test('extracts serializable messages from a WhatsApp DOM fixture', () => {
+            test('extracts serializable messages from a WhatsApp DOM fixture', () => {
       renderWhatsAppChatFixture();
 
       const result = reader.extractMessages();
@@ -74,6 +74,69 @@ describe('WhatsAppReader', () => {
       expect(result.messages[0]).not.toHaveProperty('rawElement');
     });
 
+    test('extracts direction from modern WhatsApp bubble alignment when legacy classes are absent', () => {
+      document.body.innerHTML = `
+        <main role="application">
+          <section role="log">
+            <div data-id="wa-msg-1">
+              <div style="display:flex;align-items:flex-start;">
+                <div data-testid="msg-container">
+                  <span class="selectable-text">Incoming modern bubble</span>
+                </div>
+              </div>
+            </div>
+            <div data-id="wa-msg-2">
+              <div style="display:flex;align-items:flex-end;">
+                <div data-testid="msg-container">
+                  <span class="selectable-text">Outgoing modern bubble</span>
+                </div>
+              </div>
+            </div>
+          </section>
+        </main>
+        <header data-testid="conversation-info-header">John Doe</header>
+      `;
+
+      const container = document.querySelector('[role="log"]');
+      container.getBoundingClientRect = () => ({ top: 0, bottom: 500, left: 0, right: 800, width: 800, height: 500 });
+      document.querySelector('[data-id="wa-msg-1"]').getBoundingClientRect = () => ({ top: 10, bottom: 70, left: 0, right: 320, width: 320, height: 60 });
+      document.querySelector('[data-id="wa-msg-2"]').getBoundingClientRect = () => ({ top: 90, bottom: 150, left: 480, right: 800, width: 320, height: 60 });
+
+      const result = reader.extractMessages();
+
+      expect(result.messages[0]).toMatchObject({
+        id: 'wa-msg-1',
+        sender: 'Contact',
+        isIncoming: true,
+        direction: 'in'
+      });
+      expect(result.messages[1]).toMatchObject({
+        id: 'wa-msg-2',
+        sender: 'You',
+        isIncoming: false,
+        direction: 'out'
+      });
+    });
+    test('extracts only messages visible in the chat viewport', () => {
+      document.body.innerHTML = `
+        <main role="application"><section role="log">
+          <div data-id="hidden-old" data-incoming="true"><span class="selectable-text">Hidden old message</span></div>
+          <div data-id="visible-now" data-incoming="true"><span class="selectable-text">Visible message</span></div>
+          <div data-id="hidden-next"><span class="selectable-text">Hidden below message</span></div>
+        </section></main>
+      `;
+
+      const container = document.querySelector('[role="log"]');
+      container.getBoundingClientRect = () => ({ top: 0, bottom: 500, left: 0, right: 800, width: 800, height: 500 });
+      document.querySelector('[data-id="hidden-old"]').getBoundingClientRect = () => ({ top: -200, bottom: -100, left: 0, right: 700, width: 700, height: 100 });
+      document.querySelector('[data-id="visible-now"]').getBoundingClientRect = () => ({ top: 150, bottom: 250, left: 0, right: 700, width: 700, height: 100 });
+      document.querySelector('[data-id="hidden-next"]').getBoundingClientRect = () => ({ top: 650, bottom: 750, left: 0, right: 700, width: 700, height: 100 });
+
+      const result = reader.extractMessages();
+
+      expect(result.count).toBe(1);
+      expect(result.messages[0]).toMatchObject({ id: 'visible-now', text: 'Visible message' });
+    });
     test('skips empty message text from real DOM nodes', () => {
       document.body.innerHTML = `
         <main role="application"><section role="log">
@@ -272,3 +335,6 @@ describe('WhatsAppReader', () => {
     });
   });
 });
+
+
+
