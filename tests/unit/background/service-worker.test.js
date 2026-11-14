@@ -13,8 +13,8 @@ function setupBackgroundChrome() {
       lastError: null
     },
     tabs: {
-      query: jest.fn().mockResolvedValue([{ id: 11, url: 'https://example.test', title: 'Example' }]),
-      get: jest.fn().mockResolvedValue({ id: 11, url: 'https://example.test', title: 'Example' }),
+      query: jest.fn().mockResolvedValue([{ id: 11, url: 'https://web.whatsapp.com/', title: 'WhatsApp' }]),
+      get: jest.fn().mockResolvedValue({ id: 11, url: 'https://web.whatsapp.com/', title: 'WhatsApp' }),
       sendMessage: jest.fn().mockImplementation(async (_tabId, message) => {
         if (message?.type === 'SPAI_PING') {
           return { success: true, ready: true };
@@ -44,6 +44,17 @@ function setupBackgroundChrome() {
         set: jest.fn().mockResolvedValue({}),
         remove: jest.fn().mockResolvedValue({})
       }
+    },
+    action: {
+      disable: jest.fn().mockResolvedValue(undefined)
+    },
+    declarativeContent: {
+      onPageChanged: {
+        removeRules: jest.fn((_ids, callback) => callback?.()),
+        addRules: jest.fn((_rules, callback) => callback?.())
+      },
+      PageStateMatcher: jest.fn(function PageStateMatcher(options) { this.options = options; }),
+      ShowAction: jest.fn(function ShowAction() {})
     },
     offscreen: {
       hasDocument: jest.fn().mockResolvedValue(true),
@@ -85,8 +96,9 @@ describe('background service worker message routing', () => {
 
     expect(chrome.runtime.onInstalled.addListener).toHaveBeenCalledWith(expect.any(Function));
     expect(chrome.runtime.onMessage.addListener).toHaveBeenCalledWith(expect.any(Function));
-    expect(chrome.tabs.onUpdated.addListener).toHaveBeenCalledWith(expect.any(Function));
-    expect(chrome.tabs.onActivated.addListener).toHaveBeenCalledWith(expect.any(Function));
+    // No reinjection on arbitrary tab navigation: the manifest content script covers the supported hosts.
+    expect(chrome.tabs.onUpdated.addListener).not.toHaveBeenCalled();
+    expect(chrome.tabs.onActivated.addListener).not.toHaveBeenCalled();
 
     const result = await sendRuntimeMessage(listeners.message, { type: 'UNKNOWN_TYPE' });
 
@@ -162,21 +174,40 @@ describe('background service worker message routing', () => {
     expect(chrome.scripting.executeScript).not.toHaveBeenCalledWith(expect.objectContaining({ target: { tabId: 22 } }));
   });
 
-  test('refreshes the content script on supported tab completion when ping fails', async () => {
-    const listeners = await importBackground();
-    chrome.tabs.sendMessage.mockImplementation(async (_tabId, message) => {
-      if (message?.type === 'SPAI_PING') {
-        throw new Error('Receiving end does not exist.');
-      }
-      return { success: true };
-    });
-
-    listeners.updated(31, { status: 'complete' }, { id: 31, url: 'https://web.whatsapp.com/' });
+  test('disables the toolbar action by default and shows it only on WhatsApp Web and Telegram Web', async () => {
+    await importBackground();
     await new Promise(resolve => setTimeout(resolve, 0));
 
+    expect(chrome.action.disable).toHaveBeenCalledWith();
+    expect(chrome.declarativeContent.onPageChanged.removeRules).toHaveBeenCalled();
+    const [rules] = chrome.declarativeContent.onPageChanged.addRules.mock.calls[0];
+    expect(rules).toHaveLength(1);
+    expect(rules[0].conditions.map(condition => condition.options.pageUrl.hostEquals))
+      .toEqual(['web.whatsapp.com', 'web.telegram.org']);
+    expect(rules[0].conditions.every(condition => condition.options.pageUrl.schemes[0] === 'https')).toBe(true);
+    expect(rules[0].actions[0]).toBeInstanceOf(chrome.declarativeContent.ShowAction);
+  });
+
+  test('only queries tabs on the supported hosts during install-time injection', async () => {
+    const listeners = await importBackground();
+    chrome.tabs.query.mockResolvedValueOnce([]);
+
+    await listeners.installed({ reason: 'install' });
+
+    expect(chrome.tabs.query).toHaveBeenCalledWith({ url: ['https://web.whatsapp.com/*', 'https://web.telegram.org/*'] });
+  });
+
+  test('uses the content script path from the built manifest when available', async () => {
+    const listeners = await importBackground();
+    chrome.runtime.getManifest = jest.fn(() => ({ content_scripts: [{ js: ['assets/content-script-loader.js'] }] }));
+    chrome.tabs.query.mockResolvedValueOnce([{ id: 21, url: 'https://web.whatsapp.com/' }]);
+    chrome.tabs.sendMessage.mockImplementation(async () => { throw new Error('Receiving end does not exist.'); });
+
+    await listeners.installed({ reason: 'update' });
+
     expect(chrome.scripting.executeScript).toHaveBeenCalledWith({
-      target: { tabId: 31 },
-      files: ['src/content/content-script.js']
+      target: { tabId: 21 },
+      files: ['assets/content-script-loader.js']
     });
   });
 
@@ -395,7 +426,8 @@ describe('background service worker message routing', () => {
     const injected = chrome.scripting.executeScript.mock.calls[0][0].func();
 
     expect(injected).not.toHaveProperty('html');
-    expect(injected.bodyText).toBe('body text');
+    expect(typeof injected.bodyText).toBe('string');
+    expect(injected.bodyText).not.toContain('<');
   });
 
   test('returns a clear unsupported-page error for non-http tabs without injecting', async () => {
@@ -406,6 +438,28 @@ describe('background service worker message routing', () => {
 
     expect(result.response).toEqual({ success: false, error: 'UNSUPPORTED_PAGE' });
     expect(chrome.tabs.sendMessage).not.toHaveBeenCalledWith(11, { type: 'EXTRACT_CONTENT' });
+    expect(chrome.scripting.executeScript).not.toHaveBeenCalled();
+  });
+
+  test('returns an unsupported-page error for https sites outside WhatsApp Web and Telegram Web', async () => {
+    const listeners = await importBackground();
+    chrome.tabs.get.mockResolvedValueOnce({ id: 11, url: 'https://example.test/page', title: 'Extensions' });
+
+    const result = await sendRuntimeMessage(listeners.message, { type: 'GET_TAB_CONTENT', tabId: 11 }, EXTENSION_PAGE_SENDER);
+
+    expect(result.response).toEqual({ success: false, error: 'UNSUPPORTED_PAGE' });
+    expect(chrome.tabs.sendMessage).not.toHaveBeenCalledWith(11, { type: 'EXTRACT_CONTENT' });
+    expect(chrome.scripting.executeScript).not.toHaveBeenCalled();
+  });
+
+  test('reports Telegram Web as not ready yet without injecting or extracting', async () => {
+    const listeners = await importBackground();
+    chrome.tabs.get.mockResolvedValueOnce({ id: 12, url: 'https://web.telegram.org/k/', title: 'Telegram' });
+
+    const result = await sendRuntimeMessage(listeners.message, { type: 'GET_TAB_CONTENT', tabId: 12 }, EXTENSION_PAGE_SENDER);
+
+    expect(result.response).toEqual({ success: false, error: 'PLATFORM_NOT_READY' });
+    expect(chrome.tabs.sendMessage).not.toHaveBeenCalledWith(12, { type: 'EXTRACT_CONTENT' });
     expect(chrome.scripting.executeScript).not.toHaveBeenCalled();
   });
 

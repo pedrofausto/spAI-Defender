@@ -55,10 +55,54 @@ function debugLog(...args) {
 }
 
 const CONTENT_SCRIPT_FILE = 'src/content/content-script.js';
+
+// The bundler rewrites the content script path in the built manifest, so read it from there.
+function getContentScriptFiles() {
+  try {
+    const files = chrome.runtime.getManifest?.()?.content_scripts?.[0]?.js;
+    if (Array.isArray(files) && files.length > 0) return files;
+  } catch (_) {
+    // Fall through to the source path.
+  }
+  return [CONTENT_SCRIPT_FILE];
+}
 const CONTENT_SCRIPT_PING = { type: 'SPAI_PING' };
 
+// The extension only runs on these two messaging web apps.
+const SUPPORTED_HOSTS = ['web.whatsapp.com', 'web.telegram.org'];
+
+function hostOf(url = '') {
+  try {
+    const parsed = new URL(String(url || ''));
+    return parsed.protocol === 'https:' ? parsed.hostname : '';
+  } catch (_) {
+    return '';
+  }
+}
+
 function isInjectableTabUrl(url = '') {
-  return /^https?:\/\//i.test(String(url || ''));
+  return SUPPORTED_HOSTS.includes(hostOf(url));
+}
+
+function isTelegramTabUrl(url = '') {
+  return hostOf(url) === 'web.telegram.org';
+}
+
+// Keep the toolbar action disabled (greyed out, no popup) everywhere except the supported hosts.
+async function configureActionVisibility() {
+  if (!chrome.action || !chrome.declarativeContent) return;
+  try {
+    await chrome.action.disable();
+    await new Promise(resolve => chrome.declarativeContent.onPageChanged.removeRules(undefined, resolve));
+    await new Promise(resolve => chrome.declarativeContent.onPageChanged.addRules([{
+      conditions: SUPPORTED_HOSTS.map(hostEquals => new chrome.declarativeContent.PageStateMatcher({
+        pageUrl: { hostEquals, schemes: ['https'] }
+      })),
+      actions: [new chrome.declarativeContent.ShowAction()]
+    }], resolve));
+  } catch (error) {
+    console.warn('Action visibility setup failed:', error?.message || error);
+  }
 }
 
 const WHATSAPP_WEB_ORIGIN = 'https://web.whatsapp.com';
@@ -115,7 +159,7 @@ async function ensureContentScriptInjected(tabId, url = '') {
   try {
     await chrome.scripting.executeScript({
       target: { tabId },
-      files: [CONTENT_SCRIPT_FILE]
+      files: getContentScriptFiles()
     });
     return { ok: true, injected: true, reason: 'injected' };
   } catch (error) {
@@ -125,7 +169,7 @@ async function ensureContentScriptInjected(tabId, url = '') {
 }
 
 async function ensureContentScriptsForOpenTabs() {
-  const tabs = await chrome.tabs.query({});
+  const tabs = await chrome.tabs.query({ url: SUPPORTED_HOSTS.map(host => `https://${host}/*`) });
   for (const tab of tabs) {
     await ensureContentScriptInjected(tab?.id, tab?.url || '');
   }
@@ -344,7 +388,11 @@ async function handleGetTabContent(tabId, sendResponse) {
       sendResponse({ success: false, error: 'UNSUPPORTED_PAGE' });
       return;
     }
-    console.log('Extracting content for tab:', tabId, tab.url);
+    if (isTelegramTabUrl(tab?.url)) {
+      // A Telegram Web adapter is planned but not implemented yet.
+      sendResponse({ success: false, error: 'PLATFORM_NOT_READY' });
+      return;
+    }
 
     await ensureContentScriptInjected(tabId, tab?.url || '');
 
@@ -363,17 +411,10 @@ async function handleGetTabContent(tabId, sendResponse) {
       console.log('Direct message to content script failed, using injection method:', err.message);
     }
 
-    // Fallback: Inject appropriate extraction function based on platform
-    let extractFunc = extractPageContent;
-    
-    if (tab.url.includes('web.whatsapp.com')) {
-      console.log('Detected WhatsApp Web - using specialized extractor');
-      extractFunc = extractWhatsAppContentDirect;
-    }
-
+    // Fallback: inject the WhatsApp extractor directly
     const results = await chrome.scripting.executeScript({
       target: { tabId },
-      func: extractFunc
+      func: extractWhatsAppContentDirect
     });
 
     if (results && results[0] && results[0].result) {
@@ -495,47 +536,6 @@ async function handleSummarizeContent(data, sendResponse) {
 }
 
 /**
- * Extract page content (injected function)
- * This function runs in the page context
- */
-function extractPageContent() {
-  const content = {
-    title: document.title,
-    url: window.location.href,
-    text: document.body.innerText,
-    bodyText: document.body.innerText,
-    headings: Array.from(document.querySelectorAll('h1, h2, h3')).map(h => ({
-      level: h.tagName,
-      text: h.textContent.trim()
-    })),
-    links: Array.from(document.querySelectorAll('a[href]')).map(a => ({
-      text: a.textContent.trim(),
-      href: a.href
-    })),
-    images: Array.from(document.querySelectorAll('img[src]')).map(img => ({
-      src: img.src,
-      alt: img.alt
-    })),
-    meta: {
-      description: document.querySelector('meta[name="description"]')?.content || '',
-      keywords: document.querySelector('meta[name="keywords"]')?.content || '',
-      author: document.querySelector('meta[name="author"]')?.content || ''
-    },
-    stats: {
-      wordCount: document.body.innerText.split(/\s+/).filter(Boolean).length,
-      paragraphCount: document.querySelectorAll('p').length,
-      headingCount: document.querySelectorAll('h1, h2, h3, h4, h5, h6').length,
-      linkCount: document.querySelectorAll('a[href]').length,
-      imageCount: document.querySelectorAll('img').length,
-      readingTime: Math.ceil(document.body.innerText.split(/\s+/).filter(Boolean).length / 200)
-    },
-    timestamp: new Date().toISOString()
-  };
-
-  return content;
-}
-
-/**
  * Extract WhatsApp Web content (injected function)
  * This function runs in the page context on WhatsApp Web
  */
@@ -613,25 +613,6 @@ function extractWhatsAppContentDirect() {
     timestamp: new Date().toISOString()
   };
 }
-
-// Handle tab updates to refresh content
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (changeInfo.status === 'complete') {
-    console.log('Tab updated:', tab.url);
-    ensureContentScriptInjected(tabId, tab?.url || '').catch(error => {
-      console.warn('Tab content script refresh failed:', error?.message || error);
-    });
-  }
-});
-
-chrome.tabs.onActivated.addListener(async ({ tabId }) => {
-  try {
-    const tab = await chrome.tabs.get(tabId);
-    await ensureContentScriptInjected(tabId, tab?.url || '');
-  } catch (error) {
-    console.warn('Active-tab content script refresh failed:', error?.message || error);
-  }
-});
 
 /**
  * Handle phishing detection (includes image analysis)
@@ -1222,6 +1203,7 @@ async function removeLegacyWhatsAppStorage() {
 }
 
 removeLegacyWhatsAppStorage();
+configureActionVisibility();
 
 console.log('spAI-Defender service worker loaded');
 

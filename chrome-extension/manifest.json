@@ -1,17 +1,17 @@
 {
   "manifest_version": 3,
-  "name": "spAI-Defender Tab Reader",
+  "name": "spAI-Defender",
   "version": "1.0.0",
-  "description": "Chrome extension with Built-in AI capability to read and analyze content from browser tabs",
+  "description": "On-device scam and phishing warnings for WhatsApp Web (Telegram Web planned), powered by Chrome built-in AI.",
   "permissions": [
-    "tabs",
-    "activeTab",
     "scripting",
     "storage",
-    "offscreen"
+    "offscreen",
+    "declarativeContent"
   ],
   "host_permissions": [
-    "<all_urls>"
+    "https://web.whatsapp.com/*",
+    "https://web.telegram.org/*"
   ],
   "background": {
     "service_worker": "src/background/service-worker.js",
@@ -20,7 +20,8 @@
   "content_scripts": [
     {
       "matches": [
-        "<all_urls>"
+        "https://web.whatsapp.com/*",
+        "https://web.telegram.org/*"
       ],
       "js": [
         "src/content/content-script.js"

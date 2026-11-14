@@ -66,7 +66,7 @@ describe('content script message handling', () => {
     delete window.__spaiDefenderContentScript;
     renderContentPage();
     Object.defineProperty(window, 'location', {
-      value: new URL('https://example.test/page'),
+      value: new URL('https://web.telegram.org/k/'),
       configurable: true
     });
   });
@@ -77,60 +77,28 @@ describe('content script message handling', () => {
     document.body.innerHTML = '';
   });
 
-  test('registers message listener and extracts structured page content', async () => {
+  test('stays idle on Telegram Web: answers pings, reports not ready, and sends nothing', async () => {
     const listeners = await importContentScript();
+    await new Promise(resolve => setTimeout(resolve, 50));
 
-    const result = sendContentMessage(listeners.message, { type: 'EXTRACT_CONTENT' });
+    const ping = sendContentMessage(listeners.message, { type: 'SPAI_PING' });
+    expect(ping.keepAlive).toBe(true);
+    expect(ping.response).toMatchObject({ success: true, ready: true });
 
-    expect(result.keepAlive).toBe(true);
-    expect(result.response.success).toBe(true);
-    expect(result.response.content).toMatchObject({
-      url: 'https://example.test/page',
-      title: 'Content Test Page'
-    });
-    expect(result.response.content.headings).toEqual([{ level: 1, text: 'Security Awareness', id: 'main-title' }]);
-    expect(result.response.content.paragraphs).toContain('Legitimate paragraph about urgent security training.');
-    expect(result.response.content.links[0]).toMatchObject({ text: 'External link', external: true });
-    expect(result.response.content.tables[0].rows).toEqual([['Name'], ['Value']]);
+    const extract = sendContentMessage(listeners.message, { type: 'EXTRACT_CONTENT' });
+    expect(extract.response).toEqual({ success: false, error: 'PLATFORM_NOT_READY' });
+
+    expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+    expect(document.querySelector('.spai-highlighted, .spai-image-container')).toBeNull();
+    expect(console.error).not.toHaveBeenCalled();
   });
 
-  test('extracts selection text with context and position', async () => {
-    const listeners = await importContentScript();
-    const range = document.createRange();
-    const selected = document.getElementById('selectable').firstChild;
-    range.setStart(selected, 0);
-    range.setEnd(selected, 8);
-    range.getBoundingClientRect = () => ({ top: 1, left: 2, width: 3, height: 4 });
-    window.getSelection().removeAllRanges();
-    window.getSelection().addRange(range);
-
-    const result = sendContentMessage(listeners.message, { type: 'EXTRACT_SELECTION' });
-
-    expect(result.response).toMatchObject({
-      success: true,
-      selection: {
-        text: 'Selected',
-        context: { tagName: 'P', className: '', id: 'selectable' },
-        position: { top: 1, left: 2, width: 3, height: 4 }
-      }
-    });
-  });
-
-  test('starts and stops content monitoring through messages', async () => {
+  test('does not respond to removed generic page messages', async () => {
     const listeners = await importContentScript();
 
-    expect(sendContentMessage(listeners.message, { type: 'START_MONITORING' }).response).toEqual({
-      success: true,
-      message: 'Content monitoring started'
-    });
-    expect(sendContentMessage(listeners.message, { type: 'START_MONITORING' }).response).toEqual({
-      success: false,
-      error: 'Monitoring already active'
-    });
-    expect(sendContentMessage(listeners.message, { type: 'STOP_MONITORING' }).response).toEqual({
-      success: true,
-      message: 'Content monitoring stopped'
-    });
+    for (const type of ['EXTRACT_SELECTION', 'START_MONITORING', 'STOP_MONITORING', 'GET_PAGE_INFO']) {
+      expect(sendContentMessage(listeners.message, { type }).response).toEqual({ error: 'Unknown message type' });
+    }
   });
 
   test('keeps the disabled security badge widget removed even when requested', async () => {
@@ -145,13 +113,9 @@ describe('content script message handling', () => {
     expect(document.getElementById('spai-security-badge')).toBeNull();
   });
 
-  test('returns page info and unknown message errors', async () => {
+  test('returns an error for unknown message types', async () => {
     const listeners = await importContentScript();
 
-    expect(sendContentMessage(listeners.message, { type: 'GET_PAGE_INFO' }).response).toMatchObject({
-      success: true,
-      info: { url: 'https://example.test/page', title: 'Content Test Page' }
-    });
     expect(sendContentMessage(listeners.message, { type: 'UNKNOWN' }).response).toEqual({ error: 'Unknown message type' });
   });
 
