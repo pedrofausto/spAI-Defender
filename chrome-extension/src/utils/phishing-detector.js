@@ -7,6 +7,7 @@ import { HybridScorer } from './hybrid-scorer.js';
 import { SentimentAnalyzer } from './sentiment-analyzer.js';
 import { LinguisticAnalyzer } from './linguistic-analyzer.js';
 import { LocalAIThreatClassifier } from './local-ai-threat-classifier.js';
+import { QUICK_DETECT_PATTERNS } from './message-risk-patterns.js';
 
 export class PhishingDetector {
   constructor(aiManager) {
@@ -17,37 +18,7 @@ export class PhishingDetector {
     this.localAIClassifier = new LocalAIThreatClassifier(aiManager);
 
     // Lightweight deterministic heuristics used before or alongside Nano.
-    this.quickPatterns = {
-      credential: [
-        /verifi(que|car).*conta/i, /verify.*account/i, /senha/i, /password/i, /credencial/i, /credential/i,
-        /c[oó]digo/i, /code/i, /otp/i, /token/i, /pin/i
-      ],
-      accountThreat: [
-        /conta.*suspens[ao]/i, /account.*suspend/i, /conta.*bloquead[ao]/i, /account.*block/i,
-        /acesso.*não.*autorizado/i, /unauthorized.*access/i, /atividade.*suspeita/i, /suspicious.*activity/i
-      ],
-      urgency: [
-        /urgente/i, /urgent/i, /imediat[ao]/i, /immediate/i, /agora/i, /now/i, /última.*chance/i, /last.*chance/i
-      ],
-      authority: [
-        /banco/i, /bank/i, /suporte/i, /support/i, /administra[cç][aã]o/i, /security team/i, /microsoft/i, /google/i
-      ],
-      reward: [
-        /pr[eê]mio/i, /prize/i, /gr[aá]tis/i, /free/i, /ganhe.*dinheiro/i, /earn.*money/i, /cashback/i, /gift/i
-      ],
-      payment: [
-        /pix/i, /boleto/i, /payment/i, /pagamento/i, /transfer/i, /crypto/i, /bitcoin/i
-      ],
-      linkAction: [
-        /clique/i, /click/i, /acesse/i, /access here/i, /link/i, /http[s]?:\/\//i, /bit\.ly/i, /tinyurl/i
-      ],
-      educational: [
-        /exemplo/i, /example/i, /treinamento/i, /training/i, /educacional/i, /awareness/i, /simula[cç][aã]o/i, /simulation/i
-      ],
-      negation: [
-        /n[aã]o clique/i, /do not click/i, /nunca compartilhe/i, /never share/i, /golpe/i, /scam alert/i, /phishing awareness/i
-      ]
-    };
+    this.quickPatterns = QUICK_DETECT_PATTERNS;
   }
 
   /**

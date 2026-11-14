@@ -1,3 +1,5 @@
+import { LOCAL_MESSAGE_RISK_PATTERNS } from '../utils/message-risk-patterns.js';
+
 (() => {
 const SPAI_CONTENT_SCRIPT_RUNTIME_KEY = '__spaiDefenderContentScript';
 const SPAI_CONTENT_SCRIPT_VERSION = '2026-07';
@@ -518,35 +520,6 @@ function cacheMessageRisk(messageId, textHash, riskData) {
   }
 }
 
-const LOCAL_MESSAGE_RISK_PATTERNS = {
-  credential: [
-    /senha/i, /password/i, /credencial/i, /credential/i, /c[oó]digo/i, /code/i, /otp/i, /token/i, /pin/i,
-    /verifi(que|car).*conta/i, /verify.*account/i, /login/i, /sign in/i
-  ],
-  urgency: [
-    /urgente/i, /urgent/i, /imediat[ao]/i, /immediate/i, /agora/i, /now/i, /última.*chance/i, /last.*chance/i,
-    /em at[eé] 24 horas/i, /within 24 hours/i
-  ],
-  authority: [
-    /banco/i, /bank/i, /suporte/i, /support/i, /security team/i, /administra[cç][aã]o/i, /microsoft/i, /google/i,
-    /conta.*bloquead[ao]/i, /account.*(blocked|suspend)/i, /atividade.*suspeita/i, /suspicious.*activity/i
-  ],
-  reward: [
-    /pr[eê]mio/i, /prize/i, /gr[aá]tis/i, /free/i, /bonus/i, /gift/i, /claim/i, /cashback/i
-  ],
-  payment: [
-    /pix/i, /boleto/i, /pagamento/i, /payment/i, /transfer/i, /bitcoin/i, /crypto/i
-  ],
-  linkAction: [
-    /clique/i, /click/i, /acesse/i, /access here/i, /link/i, /http[s]?:\/\//i, /bit\.ly/i, /tinyurl/i
-  ],
-  educational: [
-    /treinamento/i, /training/i, /awareness/i, /educacional/i, /simulation/i, /simula[cç][aã]o/i, /example/i, /exemplo/i
-  ],
-  negation: [
-    /n[aã]o clique/i, /do not click/i, /never share/i, /nunca compartilhe/i, /golpe/i, /scam alert/i, /phishing awareness/i
-  ]
-};
 
 // Set to true only for local debugging. Logs that include WhatsApp message text are gated behind it.
 const DEBUG = false;
