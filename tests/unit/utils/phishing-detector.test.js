@@ -93,8 +93,6 @@ describe('PhishingDetector', () => {
       expect(typeof detector.detectPhishingAdvanced).toBe('function');
       expect(typeof detector.detectPhishingFallback).toBe('function');
       expect(typeof detector.detectSocialEngineering).toBe('function');
-      expect(typeof detector.analyzeEmail).toBe('function');
-      expect(typeof detector.parseTextResponse).toBe('function');
       expect(typeof detector.trackThreat).toBe('function');
       expect(typeof detector.getThreatStats).toBe('function');
     });
@@ -728,125 +726,6 @@ describe('PhishingDetector', () => {
       expect(result.classification).toBe('INCONCLUSIVE');
       expect(result.validationError).toBeDefined();
     });
-  describe('analyzeEmail', () => {
-    test('should analyze email for phishing indicators', async () => {
-      mockAIManager.getOrCreateSession = jest.fn().mockResolvedValue({
-        prompt: jest.fn().mockResolvedValue(
-          '{"status":"VALID","language":"en","riskScore":20,"riskLevel":"LOW","confidence":80,"classification":"SAFE","semanticSignals":[],"evidence":[],"suspiciousPhrases":[],"recommendation":"SAFE"}'
-        )
-      });
-
-      const result = await detector.analyzeEmail(
-        'Email content',
-        'sender@example.com',
-        'Test Subject'
-      );
-      expect(result).toBeDefined();
-      expect(result).toHaveProperty('isPhishing');
-    });
-
-    test('should handle long email content', async () => {
-      mockAIManager.getOrCreateSession = jest.fn().mockResolvedValue({
-        prompt: jest.fn().mockResolvedValue('{"isPhishing": false}')
-      });
-
-      const longContent = 'content'.repeat(1000);
-      const result = await detector.analyzeEmail(longContent, 'sender@example.com', 'Subject');
-      expect(result).toBeDefined();
-    });
-
-    test('should detect suspicious sender domains', async () => {
-      mockAIManager.getOrCreateSession = jest.fn().mockResolvedValue({
-        prompt: jest.fn().mockResolvedValue(
-          '{"status":"VALID","language":"en","riskScore":90,"riskLevel":"HIGH","confidence":90,"classification":"PHISHING","semanticSignals":["credential_request","brand_impersonation","domain_mismatch"],"evidence":["sender domain impersonates brand and asks for verification"],"suspiciousPhrases":["Verify Account"],"recommendation":"DANGEROUS"}'
-        )
-      });
-
-      const result = await detector.analyzeEmail(
-        'Content',
-        'fake-sender@suspicious.com',
-        'Verify Account'
-      );
-      expect(result.isPhishing).toBe(true);
-    });
-
-    test('should use pooled session for email analysis', async () => {
-      const pooledSession = {
-        prompt: jest.fn().mockResolvedValue('{"isPhishing": false}')
-      };
-      mockAIManager.getPooledSession.mockReturnValue(pooledSession);
-
-      await detector.analyzeEmail('Content', 'sender@example.com', 'Subject');
-      expect(mockAIManager.returnSessionToPool).toHaveBeenCalledWith(pooledSession);
-    });
-
-    test('should handle email parsing errors', async () => {
-      mockAIManager.getOrCreateSession = jest.fn().mockRejectedValue(new Error('Parse error'));
-
-      const result = await detector.analyzeEmail('Content', 'sender@example.com', 'Subject');
-      expect(result).toHaveProperty('isPhishing', false);
-      expect(result).toHaveProperty('riskScore', 0);
-    });
-  });
-
-  describe('parseTextResponse', () => {
-    test('should parse text with high risk indicators', () => {
-      const text = 'This is high risk content indicating phishing attempt';
-      const result = detector.parseTextResponse(text);
-      expect(result.isPhishing).toBe(true);
-      expect(result.riskScore).toBe(80);
-      expect(result.riskLevel).toBe('HIGH');
-      expect(result.recommendation).toBe('DANGEROUS');
-    });
-
-    test('should parse text with medium risk indicators', () => {
-      const text = 'This content appears suspicious and requires caution';
-      const result = detector.parseTextResponse(text);
-      expect(result.riskScore).toBe(50);
-      expect(result.riskLevel).toBe('MEDIUM');
-      expect(result.recommendation).toBe('WARNING');
-    });
-
-    test('should return default low risk for safe text', () => {
-      const text = 'This is completely safe content';
-      const result = detector.parseTextResponse(text);
-      expect(result.riskScore).toBe(0);
-      expect(result.riskLevel).toBe('LOW');
-      expect(result.isPhishing).toBe(false);
-      expect(result.recommendation).toBe('SAFE');
-    });
-
-    test('should extract red flags from text', () => {
-      const text = 'Red flags: malicious links, suspicious sender domain';
-      const result = detector.parseTextResponse(text);
-      expect(result.redFlags.length).toBeGreaterThan(0);
-    });
-
-    test('should be case-insensitive for risk indicators', () => {
-      const text = 'This is HIGH RISK content';
-      const result = detector.parseTextResponse(text);
-      expect(result.isPhishing).toBe(true);
-    });
-
-    test('should handle empty text gracefully', () => {
-      const result = detector.parseTextResponse('');
-      expect(result).toHaveProperty('riskScore');
-      expect(result).toHaveProperty('riskLevel');
-      expect(result).toHaveProperty('isPhishing');
-    });
-
-    test('should preserve all required response fields', () => {
-      const result = detector.parseTextResponse('Test text');
-      expect(result).toHaveProperty('riskScore');
-      expect(result).toHaveProperty('riskLevel');
-      expect(result).toHaveProperty('isPhishing');
-      expect(result).toHaveProperty('redFlags');
-      expect(result).toHaveProperty('confidence');
-      expect(result).toHaveProperty('recommendation');
-      expect(result).toHaveProperty('suspiciousPhrases');
-    });
-  });
-
   describe('trackThreat', () => {
     beforeEach(() => {
       // Setup fresh mocks for trackThreat tests
@@ -1077,23 +956,6 @@ describe('PhishingDetector', () => {
 
       expect(result).toBeDefined();
       expect(result).toHaveProperty('riskScore');
-    });
-
-    test('should handle complete email analysis workflow', async () => {
-      mockAIManager.getOrCreateSession = jest.fn().mockResolvedValue({
-        prompt: jest.fn().mockResolvedValue(
-          '{"status":"VALID","language":"en","riskScore":75,"riskLevel":"HIGH","confidence":85,"classification":"PHISHING","semanticSignals":["credential_request","brand_impersonation"],"evidence":["asks to verify credentials"],"suspiciousPhrases":["verify your credentials"],"recommendation":"DANGEROUS"}'
-        )
-      });
-
-      const result = await detector.analyzeEmail(
-        'Click here to verify your credentials',
-        'noreply@fake-bank.com',
-        'Account Verification Required'
-      );
-
-      expect(result).toBeDefined();
-      expect(result).toHaveProperty('isPhishing');
     });
   });
 });

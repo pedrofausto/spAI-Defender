@@ -8,9 +8,6 @@
     "test:watch": "jest --config jest.config.cjs --watch",
     "test:coverage": "jest --config jest.config.cjs --coverage"
   },
-  "dependencies": {
-    "@anthropic-ai/claude-code": "^2.0.72"
-  },
   "devDependencies": {
     "@babel/core": "^7.28.5",
     "@babel/preset-env": "^7.28.5",

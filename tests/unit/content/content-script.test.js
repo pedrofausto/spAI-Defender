@@ -101,7 +101,7 @@ describe('content script message handling', () => {
     }
   });
 
-  test('keeps the disabled security badge widget removed even when requested', async () => {
+  test('ignores requests for the removed security badge widget', async () => {
     const listeners = await importContentScript();
 
     const result = sendContentMessage(listeners.message, {
@@ -109,7 +109,7 @@ describe('content script message handling', () => {
       data: { riskLevel: 'HIGH', riskScore: 90, indicators: ['<img src=x onerror=alert(1)>'] }
     });
 
-    expect(result.response).toEqual({ success: true });
+    expect(result.response).toEqual({ error: 'Unknown message type' });
     expect(document.getElementById('spai-security-badge')).toBeNull();
   });
 

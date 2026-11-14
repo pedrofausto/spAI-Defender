@@ -262,26 +262,13 @@ describe('background service worker message routing', () => {
     }));
   });
 
-  test('handles image analysis, page image analysis, and OCR placeholder responses', async () => {
+  test('no longer routes removed image analysis messages', async () => {
     const listeners = await importBackground();
 
-    const image = await sendRuntimeMessage(listeners.message, {
-      type: 'ANALYZE_IMAGE',
-      data: { imageUrl: 'https://example.test/logo.png', pageContext: 'login page' }
-    });
-    expect(image.response).toMatchObject({ success: true, analysis: { isMalicious: false, riskLevel: 'UNKNOWN' } });
-
-    const pageImages = await sendRuntimeMessage(listeners.message, {
-      type: 'ANALYZE_PAGE_IMAGES',
-      data: { imageUrls: ['https://example.test/logo.png'], pageContext: 'login page' }
-    });
-    expect(pageImages.response).toMatchObject({ success: true, results: { totalImages: 1, maliciousCount: 0 } });
-
-    const ocr = await sendRuntimeMessage(listeners.message, {
-      type: 'EXTRACT_IMAGE_TEXT',
-      data: { imageUrl: 'https://example.test/logo.png' }
-    });
-    expect(ocr.response).toEqual({ success: true, text: null });
+    for (const type of ['ANALYZE_IMAGE', 'ANALYZE_PAGE_IMAGES', 'EXTRACT_IMAGE_TEXT']) {
+      const result = await sendRuntimeMessage(listeners.message, { type, data: {} });
+      expect(result.response).toEqual({ error: 'Unknown message type' });
+    }
   });
 
   test('analyzes tab content through the structured local threat classifier and ignores arbitrary prompts', async () => {
@@ -463,7 +450,7 @@ describe('background service worker message routing', () => {
     expect(chrome.scripting.executeScript).not.toHaveBeenCalled();
   });
 
-  test('sends the security badge to the tab that produced the analysis', async () => {
+  test('does not ask the content script to show the removed security badge', async () => {
     const listeners = await importBackground();
 
     await sendRuntimeMessage(
@@ -479,7 +466,7 @@ describe('background service worker message routing', () => {
       { tab: { id: 77 }, url: 'https://example.test/login' }
     );
 
-    expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(77, expect.objectContaining({ type: 'SHOW_SECURITY_BADGE' }));
+    expect(chrome.tabs.sendMessage).not.toHaveBeenCalledWith(77, expect.objectContaining({ type: 'SHOW_SECURITY_BADGE' }));
   });
 
   test('does not log page content or WhatsApp chat names in normal operation', async () => {

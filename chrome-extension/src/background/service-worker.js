@@ -7,9 +7,6 @@ import { AIOffscreenProxy } from '../utils/ai-offscreen-proxy.js';
 import { PhishingDetector } from '../utils/phishing-detector.js';
 import { SentimentAnalyzer } from '../utils/sentiment-analyzer.js';
 import { PlatformDetector } from '../utils/platform-detector.js';
-import { ImageAnalyzer } from '../utils/image-analyzer.js';
-import { WhatsAppReader } from '../utils/whatsapp-reader.js';
-import { TelegramReader } from '../utils/telegram-reader.js';
 import { collectAIDiagnostics } from '../utils/ai-diagnostics.js';
 import { AnalysisCache } from '../utils/analysis-cache.js';
 import { getAnalysisMetrics, recordAnalysisEvent } from '../utils/analysis-metrics-store.js';
@@ -18,7 +15,6 @@ const aiManager = new AIOffscreenProxy();
 const phishingDetector = new PhishingDetector(aiManager);
 const sentimentAnalyzer = new SentimentAnalyzer(aiManager);
 const platformDetector = new PlatformDetector();
-const imageAnalyzer = new ImageAnalyzer(aiManager);
 
 // Analysis cache to reduce IDLE time and improve performance without cross-contaminating analyzers.
 const ANALYSIS_ALGORITHM_VERSION = 'risk-analysis-v2';
@@ -263,18 +259,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     case 'SCAN_MESSAGES':
       handleScanMessages(request.data, sendResponse);
-      return true; // Async response
-
-    case 'ANALYZE_IMAGE':
-      handleAnalyzeImage(request.data, sendResponse);
-      return true; // Async response
-
-    case 'ANALYZE_PAGE_IMAGES':
-      handleAnalyzePageImages(request.data, sendResponse);
-      return true; // Async response
-
-    case 'EXTRACT_IMAGE_TEXT':
-      handleExtractImageText(request.data, sendResponse);
       return true; // Async response
 
     case 'WHATSAPP_CHAT_SNAPSHOT':
@@ -684,30 +668,6 @@ async function handlePhishingDetection(data, sendResponse, sender = null) {
     const analysis = await phishingDetector.detectPhishing(url, content, title, images);
     debugLog('🔵 phishingDetector returned full analysis:', JSON.stringify(analysis, null, 2));
     
-    // Show badge if high risk, on the tab that sent the request when known
-    if (analysis.riskScore > 50) {
-      let badgeTabId = sender?.tab?.id ?? null;
-      if (!badgeTabId) {
-        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-        badgeTabId = tabs[0]?.id ?? null;
-      }
-      if (badgeTabId) {
-        try {
-          await chrome.tabs.sendMessage(badgeTabId, {
-            type: 'SHOW_SECURITY_BADGE',
-            data: {
-              riskLevel: analysis.riskLevel,
-              riskScore: analysis.riskScore,
-              indicators: analysis.redFlags
-            }
-          });
-        } catch (e) {
-          // Content script may not be injected on this page; ignore.
-          console.warn('SHOW_SECURITY_BADGE sendMessage failed:', e?.message || e);
-        }
-      }
-    }
-
     const response = {
       success: true,
       analysis
@@ -845,69 +805,6 @@ async function handleScanMessages(data, sendResponse) {
     });
   } catch (error) {
     console.error('Error scanning messages:', error);
-    sendResponse({
-      success: false,
-      error: error.message
-    });
-  }
-}
-
-/**
- * Handle analyze single image
- */
-async function handleAnalyzeImage(data, sendResponse) {
-  try {
-    const { imageUrl, pageContext } = data;
-    const analysis = await imageAnalyzer.analyzeImage(imageUrl, pageContext);
-    
-    sendResponse({
-      success: true,
-      analysis
-    });
-  } catch (error) {
-    console.error('Error analyzing image:', error);
-    sendResponse({
-      success: false,
-      error: error.message
-    });
-  }
-}
-
-/**
- * Handle analyze all page images
- */
-async function handleAnalyzePageImages(data, sendResponse) {
-  try {
-    const { imageUrls, pageContext } = data;
-    const results = await imageAnalyzer.analyzePageImages(imageUrls, pageContext);
-    
-    sendResponse({
-      success: true,
-      results
-    });
-  } catch (error) {
-    console.error('Error analyzing page images:', error);
-    sendResponse({
-      success: false,
-      error: error.message
-    });
-  }
-}
-
-/**
- * Handle extract text from image (OCR)
- */
-async function handleExtractImageText(data, sendResponse) {
-  try {
-    const { imageUrl } = data;
-    const extractedText = await imageAnalyzer.extractTextFromImage(imageUrl);
-    
-    sendResponse({
-      success: true,
-      text: extractedText
-    });
-  } catch (error) {
-    console.error('Error extracting image text:', error);
     sendResponse({
       success: false,
       error: error.message
