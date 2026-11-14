@@ -14,6 +14,8 @@ export default defineConfig({
   build: {
     outDir: resolve(extensionRoot, '..', 'dist'),
     emptyOutDir: true,
+    // Extension pages support modulepreload natively. Skipping the polyfill keeps fetch() out of the bundle.
+    modulePreload: { polyfill: false },
     rollupOptions: {
       // The offscreen document is opened at runtime through chrome.offscreen and is not
       // referenced by the manifest, so it must be listed as an extra entry point.
