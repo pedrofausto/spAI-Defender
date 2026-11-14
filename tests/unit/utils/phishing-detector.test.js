@@ -228,8 +228,9 @@ describe('PhishingDetector', () => {
     test('does not apply the educational discount to credential lures that use educational wording', () => {
       const result = detector.quickDetect('Example: send your password now');
       expect(result.context.educational).toBe(true);
-      // credential (24) + urgency (10) + pressure bonus (18) + two-category bonus (8), no -18 discount
-      expect(result.score).toBe(60);
+      // share_code family (65) for "send your password"; the -18 educational discount is skipped
+      // because a credential request is present.
+      expect(result.score).toBe(65);
     });
 
     test('does not apply the negation discount when payment signals are present', () => {
@@ -445,9 +446,10 @@ describe('PhishingDetector', () => {
         false
       );
 
-      // Credential wording disables the educational discount, so the deterministic floor applies.
-      expect(result.heuristicScore).toBe(60);
-      expect(result.riskLevel).toBe('MEDIUM_HIGH');
+      // The scam-pattern rules see no request for credentials here (the old keyword list matched
+      // the bare word "credentials"), so there is no deterministic floor to apply.
+      expect(result.heuristicScore).toBe(0);
+      expect(result.riskLevel).toBe('UNKNOWN');
       expect(result.classification).toBe('INCONCLUSIVE');
       expect(result.detectionMethod).toBe('gemini_nano_schema_rejected');
     });

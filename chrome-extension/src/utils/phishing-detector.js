@@ -8,6 +8,7 @@ import { SentimentAnalyzer } from './sentiment-analyzer.js';
 import { LinguisticAnalyzer } from './linguistic-analyzer.js';
 import { LocalAIThreatClassifier } from './local-ai-threat-classifier.js';
 import { QUICK_DETECT_PATTERNS } from './message-risk-patterns.js';
+import { scoreMessage } from './scam-rules.js';
 
 export class PhishingDetector {
   constructor(aiManager) {
@@ -17,7 +18,8 @@ export class PhishingDetector {
     this.hybridScorer = new HybridScorer();
     this.localAIClassifier = new LocalAIThreatClassifier(aiManager);
 
-    // Lightweight deterministic heuristics used before or alongside Nano.
+    // Legacy keyword lists, kept for consumers that read them. quickDetect now scores with the
+    // scam-pattern rules in scam-rules.js.
     this.quickPatterns = QUICK_DETECT_PATTERNS;
   }
 
@@ -28,53 +30,12 @@ export class PhishingDetector {
    */
   quickDetect(content) {
     if (!content || typeof content !== 'string') {
-      return { score: 0, level: 'SAFE', matches: [], semanticSignals: [], suspiciousPhrases: [], context: { educational: false, negated: false } };
+      return { score: 0, level: 'SAFE', matches: [], semanticSignals: [], suspiciousPhrases: [], evidence: [], context: { educational: false, negated: false } };
     }
 
-    const text = String(content);
-    const matches = [];
-    const semanticSignals = new Set();
-    const suspiciousPhrases = new Set();
-    let score = 0;
-
-    const applyCategory = (category, severity, delta, signal = null) => {
-      for (const pattern of this.quickPatterns[category] || []) {
-        if (pattern.test(text)) {
-          matches.push({ pattern: pattern.source, severity, category });
-          suspiciousPhrases.add(pattern.source);
-          score += delta;
-          if (signal) semanticSignals.add(signal);
-        }
-      }
-    };
-
-    applyCategory('credential', 'CRITICAL', 24, 'credential_request');
-    applyCategory('accountThreat', 'CRITICAL', 22, 'account_threat');
-    applyCategory('urgency', 'WARNING', 10, 'urgent_action');
-    applyCategory('authority', 'WARNING', 12, 'authority_impersonation');
-    applyCategory('reward', 'WARNING', 16, 'financial_reward');
-    applyCategory('payment', 'WARNING', 18, 'payment_request');
-    applyCategory('linkAction', 'WARNING', 12, 'link_action');
-
-    const educational = (this.quickPatterns.educational || []).some(pattern => pattern.test(text));
-    const negated = (this.quickPatterns.negation || []).some(pattern => pattern.test(text));
-
-    const uniqueCategories = new Set(matches.map(match => match.category)).size;
-    if (uniqueCategories >= 3) score += 16;
-    else if (uniqueCategories === 2) score += 8;
-
-    const hasCredentialPressure = semanticSignals.has('credential_request') && semanticSignals.has('urgent_action');
-    const hasRewardPressure = semanticSignals.has('financial_reward') && semanticSignals.has('link_action');
-    if (hasCredentialPressure) score += 18;
-    if (hasRewardPressure) score += 10;
-
-    // Educational or negated wording must not hide credential, OTP or payment lures.
-    const hasSensitiveLure = matches.some(match => match.category === 'credential' || match.category === 'payment');
-    if (educational && !hasSensitiveLure) score -= 18;
-    if (negated && !hasSensitiveLure) score -= 14;
-
-    score = Math.max(0, Math.min(100, score));
-
+    // Scam-pattern combinations over accent-insensitive, negation-aware text (see scam-rules.js).
+    const result = scoreMessage(content);
+    const score = result.score;
     const level = score >= 80 ? 'HIGH'
       : score >= 55 ? 'MEDIUM'
       : score >= 25 ? 'LOW'
@@ -83,10 +44,11 @@ export class PhishingDetector {
     return {
       score,
       level,
-      matches,
-      semanticSignals: Array.from(semanticSignals),
-      suspiciousPhrases: Array.from(suspiciousPhrases).slice(0, 8),
-      context: { educational, negated }
+      matches: result.matches,
+      semanticSignals: result.semanticSignals,
+      suspiciousPhrases: result.evidence.slice(0, 8),
+      evidence: result.evidence,
+      context: result.context
     };
   }
 
