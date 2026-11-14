@@ -3,7 +3,7 @@
  * Global test configuration and mock setup
  */
 
-// Mock jest-chrome if not available
+// Provide a minimal chrome global for tests
 if (!global.chrome) {
   global.chrome = {
     tabs: {},

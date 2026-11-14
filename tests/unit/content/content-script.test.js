@@ -2,6 +2,10 @@
  * Content script behavior tests
  */
 
+function setTestUrl(url) {
+  global.__jsdom.reconfigure({ url });
+}
+
 function renderContentPage() {
   document.body.innerHTML = `
     <header>Header</header>
@@ -65,10 +69,7 @@ describe('content script message handling', () => {
   beforeEach(() => {
     delete window.__spaiDefenderContentScript;
     renderContentPage();
-    Object.defineProperty(window, 'location', {
-      value: new URL('https://web.telegram.org/k/'),
-      configurable: true
-    });
+    setTestUrl('https://web.telegram.org/k/');
   });
 
   afterEach(() => {
@@ -120,10 +121,7 @@ describe('content script message handling', () => {
   });
 
   test('extracts WhatsApp chat content from the main pane without sidebar messages', async () => {
-    Object.defineProperty(window, 'location', {
-      value: new URL('https://web.whatsapp.com/'),
-      configurable: true
-    });
+    setTestUrl('https://web.whatsapp.com/');
     document.body.innerHTML = `
       <div id="pane-side">
         <div role="row"><span class="selectable-text"><span>Sidebar preview should not be exported</span></span></div>
@@ -151,10 +149,7 @@ describe('content script message handling', () => {
   });
 
   test('extracts only visible WhatsApp messages from the main pane', async () => {
-    Object.defineProperty(window, 'location', {
-      value: new URL('https://web.whatsapp.com/'),
-      configurable: true
-    });
+    setTestUrl('https://web.whatsapp.com/');
     document.body.innerHTML = `
       <div id="main" role="main">
         <header><span dir="auto" title="Security Team">Security Team</span></header>
@@ -181,10 +176,7 @@ describe('content script message handling', () => {
     expect(result.response.content.stats.paragraphCount).toBe(1);
   });
   test('reanalyzes newly visible WhatsApp messages after scroll changes the viewport', async () => {
-    Object.defineProperty(window, 'location', {
-      value: new URL('https://web.whatsapp.com/'),
-      configurable: true
-    });
+    setTestUrl('https://web.whatsapp.com/');
     document.body.innerHTML = `
       <div id="main" role="main">
         <header><span dir="auto" title="Security Team">Security Team</span></header>
@@ -229,10 +221,7 @@ describe('content script message handling', () => {
   });
 
   test('publishes WhatsApp snapshot only after debounce when chat changes', async () => {
-    Object.defineProperty(window, 'location', {
-      value: new URL('https://web.whatsapp.com/'),
-      configurable: true
-    });
+    setTestUrl('https://web.whatsapp.com/');
     document.body.innerHTML = `
       <div id="main" role="main">
         <header><span dir="auto" title="Security Team">Security Team</span></header>
@@ -259,7 +248,7 @@ describe('content script message handling', () => {
 
 
   test('stops runtime messaging after the extension context is invalidated', async () => {
-    Object.defineProperty(window, 'location', { value: new URL('https://web.whatsapp.com/'), configurable: true });
+    setTestUrl('https://web.whatsapp.com/');
     document.body.innerHTML = `<div id="main" role="main"><header><span dir="auto" title="Security Team">Security Team</span></header><div role="row" data-id="m1"><div class="message-in"><span class="selectable-text"><span>Review this login</span></span></div></div></div>`;
     document.body.innerText = document.body.textContent;
 
@@ -279,10 +268,7 @@ describe('content script message handling', () => {
 
 
   test('outlines only validated malicious WhatsApp bubbles without styling message text', async () => {
-    Object.defineProperty(window, 'location', {
-      value: new URL('https://web.whatsapp.com/'),
-      configurable: true
-    });
+    setTestUrl('https://web.whatsapp.com/');
     document.body.innerHTML = `
       <div id="main" role="main">
         <header><span dir="auto" title="Security Team">Security Team</span></header>
@@ -316,10 +302,7 @@ describe('content script message handling', () => {
   });
 
   test('shows local heuristic yellow highlight before the final Nano-backed result escalates to red', async () => {
-    Object.defineProperty(window, 'location', {
-      value: new URL('https://web.whatsapp.com/'),
-      configurable: true
-    });
+    setTestUrl('https://web.whatsapp.com/');
     document.body.innerHTML = `
       <div id="main" role="main">
         <header><span dir="auto" title="Security Team">Security Team</span></header>
@@ -348,10 +331,7 @@ describe('content script message handling', () => {
     delete global.__contentRuntimeResponder;
   });
   test('keeps the local pre-highlight when the AI result is safe but local rules still flag the message', async () => {
-    Object.defineProperty(window, 'location', {
-      value: new URL('https://web.whatsapp.com/'),
-      configurable: true
-    });
+    setTestUrl('https://web.whatsapp.com/');
     document.body.innerHTML = `
       <div id="main" role="main">
         <header><span dir="auto" title="Security Team">Security Team</span></header>
@@ -376,10 +356,7 @@ describe('content script message handling', () => {
   });
 
   test('does not log WhatsApp message text while analyzing messages', async () => {
-    Object.defineProperty(window, 'location', {
-      value: new URL('https://web.whatsapp.com/'),
-      configurable: true
-    });
+    setTestUrl('https://web.whatsapp.com/');
     document.body.innerHTML = `
       <div id="main" role="main">
         <header><span dir="auto" title="Security Team">Security Team</span></header>
@@ -403,10 +380,7 @@ describe('content script message handling', () => {
   });
 
   test('uses amber outline for medium-risk WhatsApp messages without escalating to malicious red', async () => {
-    Object.defineProperty(window, 'location', {
-      value: new URL('https://web.whatsapp.com/'),
-      configurable: true
-    });
+    setTestUrl('https://web.whatsapp.com/');
     document.body.innerHTML = `
       <div id="main" role="main">
         <header><span dir="auto" title="Security Team">Security Team</span></header>
