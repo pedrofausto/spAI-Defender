@@ -52,10 +52,15 @@ The `chrome-extension/` source folder can no longer be loaded directly, because 
 - Run `npx jest` (or `npm test`) to run the unit test suite. Jest runs against the source files, not the bundle.
 - Run `npm run test:coverage` for a coverage report.
 
+## Evaluation
+
+`npm run eval -- <file.jsonl>` scores a labelled JSONL dataset with the deterministic local heuristics (no AI, no network) and prints precision, recall, F1 and false-positive rate overall and per language. See `eval/README.md` for the format. The bundled `eval/fixtures/sample.jsonl` is synthetic and only proves the harness runs; a real public dataset is still to be selected.
+
 ## Repository layout
 
 - `chrome-extension/`: extension source (manifest, service worker, content script, offscreen document, popup, shared utilities).
 - `tests/`: Jest unit tests and Chrome API mocks.
+- `eval/`: offline evaluation harness for the local heuristics.
 - `vite.config.js`: bundler configuration. The offscreen document is listed as an extra entry because the manifest does not reference it.
 
 ## License
