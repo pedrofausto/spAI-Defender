@@ -4,6 +4,8 @@
   "description": "Chrome extension for detecting phishing and social engineering attacks",
   "type": "module",
   "scripts": {
+    "build": "vite build",
+    "dev": "vite",
     "test": "jest --config jest.config.cjs",
     "test:watch": "jest --config jest.config.cjs --watch",
     "test:coverage": "jest --config jest.config.cjs --coverage"

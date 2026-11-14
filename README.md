@@ -35,21 +35,28 @@ Detection is layered. Each layer runs locally.
 
 Chrome built-in AI availability depends on the Chrome version, enabled flags or origin trials, the operating system, free disk space and GPU or CPU resources. These requirements change between releases, so the exact values are to be verified against the official Chrome documentation for built-in AI (developer.chrome.com, "Built-in AI" and "Prompt API" pages) before relying on them. Without the model, the local heuristics still run and AI-backed results are reported as inconclusive.
 
-## Install for development
+## Build and install
+
+The extension is bundled with Vite and the CRXJS plugin, which lets the content script import shared modules such as the keyword lexicon.
 
 - Install dependencies with `npm install`.
-- Load the `chrome-extension/` folder as an unpacked extension from `chrome://extensions` with Developer mode enabled.
-- Open WhatsApp Web and click the toolbar icon to see the popup.
+- Run `npm run build`. The loadable extension is written to `dist/`, with `dist/manifest.json` generated from `chrome-extension/manifest.json` (CRXJS rewrites the service worker and content script entries to bundled loaders and adds the needed web accessible resources).
+- In `chrome://extensions`, enable Developer mode, choose "Load unpacked" and select the `dist/` folder.
+- Open WhatsApp Web and click the toolbar icon to see the popup. On any other site the icon is greyed out and does nothing.
+- `npm run dev` starts the Vite dev server with CRXJS hot reload. Load `dist/` the same way while it runs.
+
+The `chrome-extension/` source folder can no longer be loaded directly, because the content script now uses ES module imports.
 
 ## Tests
 
-- Run `npx jest` (or `npm test`) to run the unit test suite against the source files.
+- Run `npx jest` (or `npm test`) to run the unit test suite. Jest runs against the source files, not the bundle.
 - Run `npm run test:coverage` for a coverage report.
 
 ## Repository layout
 
 - `chrome-extension/`: extension source (manifest, service worker, content script, offscreen document, popup, shared utilities).
 - `tests/`: Jest unit tests and Chrome API mocks.
+- `vite.config.js`: bundler configuration. The offscreen document is listed as an extra entry because the manifest does not reference it.
 
 ## License
 
