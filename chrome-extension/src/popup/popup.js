@@ -13,7 +13,7 @@ const translations = {
     summarizing:'Generating local summary',complete:'Local analysis complete',partial:'Analysis completed with partial results',
     noEvidence:'No validated malicious evidence was observed.',storageUnavailable:'Local metrics unavailable',
     aiUnavailable:'Gemini Nano is unavailable. Risk remains inconclusive.',noContent:'No analyzable content was extracted.',
-    promptComplete:'Custom analysis completed.',yes:'Yes',no:'No',unknown:'Unknown',historyWindow:'days',localMetadataEvents:'local metadata events',recentChats:'Recent chats',dangerousChats:'Most dangerous chats',noRecentChats:'No recent WhatsApp chats yet.',noDangerousChats:'No dangerous WhatsApp chats yet.',highRisk:'High risk',mediumRisk:'Medium risk',visibleNow:'visible now',statusValid:'Valid',statusInconclusive:'Inconclusive',statusFailed:'Failed',classPhishing:'Phishing',classScam:'Scam',classSocialEngineering:'Social engineering',classSuspicious:'Suspicious',classSafe:'Safe',riskLow:'Low',riskMedium:'Medium',riskMediumHigh:'Medium high',riskHigh:'High',riskCritical:'Critical',platformWhatsApp:'WhatsApp',platformTelegram:'Telegram',platformGmail:'Gmail',platformOutlook:'Outlook',platformWeb:'Web',urgencyHigh:'High',urgencyMedium:'Medium',urgencyLow:'Low',trustLow:'Low',trustMedium:'Medium',trustHigh:'High',loadingCurrentTab:'Loading current tab...',awaitingAnalysis:'Awaiting analysis',localRecommendation:'Content remains local while Gemini Nano evaluates the active tab.',pendingLocalSummary:'Pending local analysis.',moreActions:'More actions',close:'Close',languageEnglish:'English',languagePortuguese:'Portuguese',chatInspector:'Selected chat',historicalPeak:'Historical peak',observations:'Observations',lastUpdated:'Last updated',noChatSelected:'Select a recent or dangerous chat to inspect its local metadata.',activeChat:'Active chat',selectedFromHistory:'Selected from local history',currentRiskHigh:'High',currentRiskMedium:'Medium',currentRiskLow:'Low'
+    promptComplete:'Custom analysis completed.',yes:'Yes',no:'No',unknown:'Unknown',historyWindow:'days',localMetadataEvents:'local metadata events',recentChats:'Recent chats',dangerousChats:'Most dangerous chats',noRecentChats:'No recent WhatsApp chats yet.',noDangerousChats:'No dangerous WhatsApp chats yet.',highRisk:'High risk',mediumRisk:'Medium risk',visibleNow:'visible now',statusValid:'Valid',statusInconclusive:'Inconclusive',statusFailed:'Failed',classPhishing:'Phishing',classScam:'Scam',classSocialEngineering:'Social engineering',classSuspicious:'Suspicious',classSafe:'Safe',riskLow:'Low',riskMedium:'Medium',riskMediumHigh:'Medium high',riskHigh:'High',riskCritical:'Critical',platformWhatsApp:'WhatsApp',platformTelegram:'Telegram',platformGmail:'Gmail',platformOutlook:'Outlook',platformWeb:'Web',urgencyHigh:'High',urgencyMedium:'Medium',urgencyLow:'Low',trustLow:'Low',trustMedium:'Medium',trustHigh:'High',loadingCurrentTab:'Loading current tab...',awaitingAnalysis:'Awaiting analysis',localRecommendation:'Content remains local while Gemini Nano evaluates the active tab.',pendingLocalSummary:'Pending local analysis.',moreActions:'More actions',close:'Close',languageEnglish:'English',languagePortuguese:'Portuguese',chatInspector:'Selected chat',historicalPeak:'Historical peak',observations:'Observations',lastUpdated:'Last updated',noChatSelected:'Select a recent or dangerous chat to inspect its local metadata.',activeChat:'Active chat',selectedFromHistory:'Selected from local history',currentRiskHigh:'High',currentRiskMedium:'Medium',currentRiskLow:'Low',unsupportedPage:'This page cannot be analyzed. Open a regular http or https page and try again.'
   },
   'pt-BR': {
     currentRisk:'Risco atual',confidence:'Confiança',extract:'Extração',risk:'Risco',language:'Linguagem',summary:'Resumo',
@@ -29,7 +29,7 @@ const translations = {
     summarizing:'Gerando resumo local',complete:'Análise local concluída',partial:'Análise concluída com resultados parciais',
     noEvidence:'Nenhuma evidência maliciosa validada foi observada.',storageUnavailable:'Métricas locais indisponíveis',
     aiUnavailable:'Gemini Nano indisponível. O risco permanece inconclusivo.',noContent:'Nenhum conteúdo analisável foi extraído.',
-    promptComplete:'Análise personalizada concluída.',yes:'Sim',no:'Não',unknown:'Desconhecido',historyWindow:'dias',localMetadataEvents:'eventos locais de metadados',recentChats:'Chats recentes',dangerousChats:'Chats mais perigosos',noRecentChats:'Nenhum chat recente do WhatsApp ainda.',noDangerousChats:'Nenhum chat perigoso do WhatsApp ainda.',highRisk:'Alto risco',mediumRisk:'Risco médio',visibleNow:'visíveis agora',statusValid:'Válido',statusInconclusive:'Inconclusivo',statusFailed:'Falha',classPhishing:'Phishing',classScam:'Golpe',classSocialEngineering:'Engenharia social',classSuspicious:'Suspeito',classSafe:'Seguro',riskLow:'Baixo',riskMedium:'Médio',riskMediumHigh:'Médio-alto',riskHigh:'Alto',riskCritical:'Crítico',platformWhatsApp:'WhatsApp',platformTelegram:'Telegram',platformGmail:'Gmail',platformOutlook:'Outlook',platformWeb:'Web',urgencyHigh:'Alta',urgencyMedium:'Média',urgencyLow:'Baixa',trustLow:'Baixa',trustMedium:'Média',trustHigh:'Alta',loadingCurrentTab:'Carregando aba atual...',awaitingAnalysis:'Aguardando análise',localRecommendation:'O conteúdo permanece local enquanto o Gemini Nano avalia a aba ativa.',pendingLocalSummary:'Análise local pendente.',moreActions:'Mais ações',close:'Fechar',languageEnglish:'Inglês',languagePortuguese:'Português',chatInspector:'Chat selecionado',historicalPeak:'Pico histórico',observations:'Ocorrências',lastUpdated:'Última atualização',noChatSelected:'Selecione um chat recente ou perigoso para inspecionar os metadados locais.',activeChat:'Chat ativo',selectedFromHistory:'Selecionado do histórico local',currentRiskHigh:'Alto',currentRiskMedium:'Médio',currentRiskLow:'Baixo'
+    promptComplete:'Análise personalizada concluída.',yes:'Sim',no:'Não',unknown:'Desconhecido',historyWindow:'dias',localMetadataEvents:'eventos locais de metadados',recentChats:'Chats recentes',dangerousChats:'Chats mais perigosos',noRecentChats:'Nenhum chat recente do WhatsApp ainda.',noDangerousChats:'Nenhum chat perigoso do WhatsApp ainda.',highRisk:'Alto risco',mediumRisk:'Risco médio',visibleNow:'visíveis agora',statusValid:'Válido',statusInconclusive:'Inconclusivo',statusFailed:'Falha',classPhishing:'Phishing',classScam:'Golpe',classSocialEngineering:'Engenharia social',classSuspicious:'Suspeito',classSafe:'Seguro',riskLow:'Baixo',riskMedium:'Médio',riskMediumHigh:'Médio-alto',riskHigh:'Alto',riskCritical:'Crítico',platformWhatsApp:'WhatsApp',platformTelegram:'Telegram',platformGmail:'Gmail',platformOutlook:'Outlook',platformWeb:'Web',urgencyHigh:'Alta',urgencyMedium:'Média',urgencyLow:'Baixa',trustLow:'Baixa',trustMedium:'Média',trustHigh:'Alta',loadingCurrentTab:'Carregando aba atual...',awaitingAnalysis:'Aguardando análise',localRecommendation:'O conteúdo permanece local enquanto o Gemini Nano avalia a aba ativa.',pendingLocalSummary:'Análise local pendente.',moreActions:'Mais ações',close:'Fechar',languageEnglish:'Inglês',languagePortuguese:'Português',chatInspector:'Chat selecionado',historicalPeak:'Pico histórico',observations:'Ocorrências',lastUpdated:'Última atualização',noChatSelected:'Selecione um chat recente ou perigoso para inspecionar os metadados locais.',activeChat:'Chat ativo',selectedFromHistory:'Selecionado do histórico local',currentRiskHigh:'Alto',currentRiskMedium:'Médio',currentRiskLow:'Baixo',unsupportedPage:'Esta página não pode ser analisada. Abra uma página http ou https comum e tente novamente.'
   }
 };
 
@@ -171,15 +171,31 @@ function localizeLanguageCode(value) {
   if (normalized.startsWith('en')) return t('languageEnglish');
   return String(value);
 }
+const UNSUPPORTED_PAGE_CODE = 'UNSUPPORTED_PAGE';
+const WHATSAPP_REANALYSIS_TIMEOUT_MS = 5000;
+function isSupportedPageUrl(url) {
+  return /^https?:\/\//i.test(String(url || ''));
+}
+function friendlyErrorMessage(error) {
+  if (error?.message === UNSUPPORTED_PAGE_CODE) return t('unsupportedPage');
+  return error?.message || t('failed');
+}
 function isWhatsAppCurrentTab() {
-  return currentPlatform === 'WHATSAPP' || Boolean((currentTab?.url || '').includes('web.whatsapp.com'));
+  // A detected platform is authoritative. The URL is only a fallback while detection is unknown.
+  if (currentPlatform !== 'UNKNOWN') return currentPlatform === 'WHATSAPP';
+  return Boolean((currentTab?.url || '').includes('web.whatsapp.com'));
 }
 async function requestWhatsAppVisibleReanalysis() {
   if (!currentTab?.id || !isWhatsAppCurrentTab()) return;
+  // Continue as soon as the service worker answers. The timeout only guards against a stalled response.
+  let timerId = null;
+  const timeout = new Promise(resolve => { timerId = setTimeout(resolve, WHATSAPP_REANALYSIS_TIMEOUT_MS); });
   try {
-    await sendMessage({ type:'FORCE_WHATSAPP_REANALYSIS', tabId:currentTab.id });
-    await new Promise(resolve => setTimeout(resolve, 120));
-  } catch {}
+    await Promise.race([sendMessage({ type:'FORCE_WHATSAPP_REANALYSIS', tabId:currentTab.id }), timeout]);
+  } catch {
+  } finally {
+    clearTimeout(timerId);
+  }
 }
 function statusFromAvailability(status) {
   if (['readily','available'].includes(status)) return 'available';
@@ -388,6 +404,7 @@ function renderChatInspector() {
 }
 async function extractContent({ preferSnapshot=true } = {}) {
   if (!currentTab) throw new Error(t('noContent'));
+  if (!isSupportedPageUrl(currentTab.url)) throw new Error(UNSUPPORTED_PAGE_CODE);
   if ((currentTab.url || '').includes('web.whatsapp.com')) {
     try {
       const snapshot = await sendMessage({ type:'GET_LAST_WHATSAPP_SNAPSHOT' });
@@ -398,6 +415,7 @@ async function extractContent({ preferSnapshot=true } = {}) {
     } catch {}
   }
   const response = await sendMessage({ type:'GET_TAB_CONTENT', tabId:currentTab.id });
+  if (response.error === UNSUPPORTED_PAGE_CODE) throw new Error(UNSUPPORTED_PAGE_CODE);
   if (!response.success || !response.content) throw new Error(response.error || t('noContent'));
   return response.content;
 }
@@ -460,7 +478,7 @@ async function runFullAnalysis({ forceExtract=true }={}) {
     if (forceExtract || !extractedContent) {
       setStep('stepExtract','running',t('running')); setProgress(8,t('extracting'));
       try { extractedContent=await extractContent({ preferSnapshot: !forceExtract }); renderContentMetrics(); setStep('stepExtract','done',t('done')); }
-      catch(error){setStep('stepExtract','failed',t('failed'));showNotice(error.message);setProgress(100,t('partial'));return;}
+      catch(error){setStep('stepExtract','failed',t('failed'));showNotice(friendlyErrorMessage(error));setProgress(100,t('partial'));return;}
     } else setStep('stepExtract','done',t('done'));
     if (!aiAvailable) {
       renderRisk({ status:'INCONCLUSIVE',classification:'INCONCLUSIVE',riskLevel:'UNKNOWN',confidence:0,recommendation:t('aiUnavailable') });

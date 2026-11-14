@@ -172,6 +172,38 @@ describe('enterprise popup', () => {
     expect(document.getElementById('chatInspectorObservations').textContent).toBe('7');
   });
 
+  test('shows a friendly message for unsupported pages without requesting tab content', async () => {
+    setupChrome({
+      CHECK_AI_AVAILABILITY:{success:true,availability:'readily'},
+      GET_THREAT_STATS:{success:true,stats:{dashboard}},
+      GET_WHATSAPP_CHAT_HISTORY:{success:true,chats:[],recentChats:[],dangerousChats:[]},
+      GET_PLATFORM_INFO:{success:true,platform:'UNKNOWN'}
+    });
+    chrome.tabs.query.mockResolvedValue([{ id:3, title:'Extensions', url:'chrome://extensions/' }]);
+    await importPopup();
+
+    const sentTypes = chrome.runtime.sendMessage.mock.calls.map(([message])=>message.type);
+    expect(sentTypes).not.toContain('GET_TAB_CONTENT');
+    expect(document.getElementById('notice').textContent).toContain('cannot be analyzed');
+    expect(document.getElementById('notice').textContent).not.toContain('chrome://');
+    expect(document.getElementById('stepExtract').dataset.state).toBe('failed');
+  });
+
+  test('maps the UNSUPPORTED_PAGE code from the service worker to the friendly message', async () => {
+    setupChrome({
+      CHECK_AI_AVAILABILITY:{success:true,availability:'readily'},
+      GET_THREAT_STATS:{success:true,stats:{dashboard}},
+      GET_WHATSAPP_CHAT_HISTORY:{success:true,chats:[],recentChats:[],dangerousChats:[]},
+      GET_PLATFORM_INFO:{success:true,platform:'WEB'},
+      GET_TAB_CONTENT:{success:false,error:'UNSUPPORTED_PAGE'}
+    });
+    chrome.tabs.query.mockResolvedValue([{ id:3, title:'Example', url:'https://example.test/' }]);
+    await importPopup();
+
+    expect(document.getElementById('notice').textContent).toContain('cannot be analyzed');
+    expect(document.getElementById('notice').textContent).not.toContain('UNSUPPORTED_PAGE');
+  });
+
   test('keeps completed risk when sentiment and summary fail', async () => {
     setupChrome({
       CHECK_AI_AVAILABILITY:{success:true,availability:'readily'},
