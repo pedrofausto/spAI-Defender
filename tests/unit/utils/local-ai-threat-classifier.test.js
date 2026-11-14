@@ -174,6 +174,33 @@ describe('LocalAIThreatClassifier', () => {
     });
   });
 
+  test('destroys proxy-created sessions after use even when the prompt fails', async () => {
+    const destroy = jest.fn().mockResolvedValue(undefined);
+    const session = {
+      prompt: jest.fn().mockRejectedValue(new Error('AI_PROMPT_FAILED')),
+      destroy
+    };
+    let destroyFinished = false;
+    const aiManager = {
+      getPooledSession: jest.fn().mockReturnValue(null),
+      getOrCreateSession: jest.fn().mockResolvedValue(session),
+      // Destruction completes asynchronously, so classify() must await the release.
+      returnSessionToPool: jest.fn(async (value) => {
+        await value.destroy();
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        destroyFinished = true;
+      })
+    };
+    const classifier = new LocalAIThreatClassifier(aiManager);
+
+    const result = await classifier.classify({ content: 'hello' });
+
+    expect(result.detectionMethod).toBe('gemini_nano_unavailable');
+    expect(aiManager.returnSessionToPool).toHaveBeenCalledWith(session);
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(destroyFinished).toBe(true);
+  });
+
   test('returns inconclusive when Gemini Nano is unavailable', async () => {
     const aiManager = createAIManager('', {
       getOrCreateSession: jest.fn().mockRejectedValue(new Error('AI_UNAVAILABLE'))

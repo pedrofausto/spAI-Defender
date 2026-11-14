@@ -279,7 +279,8 @@ Return JSON with exactly these fields:
       return this.createInconclusive(error?.message || String(error), 'gemini_nano_unavailable');
     } finally {
       if (session && releaseMode === 'pool') {
-        this.aiManager?.returnSessionToPool?.(session);
+        // Awaited so that sessions which must be destroyed are gone before classify() resolves.
+        await Promise.resolve(this.aiManager?.returnSessionToPool?.(session)).catch(() => {});
       } else if (session && releaseMode === 'destroy') {
         if (typeof this.aiManager?.destroySession === 'function') {
           await this.aiManager.destroySession(session).catch(() => {});

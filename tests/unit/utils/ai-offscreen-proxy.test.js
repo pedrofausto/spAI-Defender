@@ -175,3 +175,18 @@ describe('AIOffscreenProxy Built-in AI availability contract', () => {
     expect(proxy.availability).toBe('readily');
   });
 });
+
+describe('AIOffscreenProxy pooling contract', () => {
+  test('returnSessionToPool destroys the offscreen session because proxy sessions are never pooled', async () => {
+    const proxy = makeProxy();
+    const session = await proxy.createSession();
+
+    await proxy.returnSessionToPool(session);
+
+    const destroyCalls = proxy._send.mock.calls
+      .filter(([action]) => action === 'destroySession')
+      .map(([, payload]) => payload.sessionId);
+    expect(destroyCalls).toEqual([session.sessionId]);
+    expect(proxy.getPooledSession()).toBeNull();
+  });
+});

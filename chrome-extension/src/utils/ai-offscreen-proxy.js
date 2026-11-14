@@ -328,14 +328,15 @@ export class AIOffscreenProxy {
 
   /**
    * Compatibility with AISessionManager pooling API.
-   * Offscreen sessions are lightweight proxies; pooling is handled internally by the offscreen map.
+   * Offscreen sessions are lightweight proxies; they are not pooled in the service worker.
    */
   getPooledSession() {
     return null;
   }
 
-  returnSessionToPool(_session) {
-    // no-op
+  async returnSessionToPool(session) {
+    // Proxy sessions are never pooled, so returning one destroys it to release the offscreen session.
+    await this.destroySession(session).catch(() => {});
   }
 
   async cloneSession() {
