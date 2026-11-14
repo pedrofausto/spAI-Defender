@@ -8,6 +8,13 @@ import { LinguisticAnalyzer } from './linguistic-analyzer.js';
 import { EmotionAnalyzer } from './emotion-analyzer.js';
 import { createPromptNonce, untrustedMarkers, sanitizeUntrustedText, capText } from './prompt-guard.js';
 
+// Set to true only for local debugging. Raw AI responses can echo page text, so they are not logged by default.
+const DEBUG = false;
+
+function debugLog(...args) {
+  if (DEBUG) console.log(...args);
+}
+
 export class SentimentAnalyzer {
   constructor(aiManager) {
     this.aiManager = aiManager;
@@ -116,7 +123,7 @@ Provide JSON response:
 
       const response = await this.withSession({ temperature: 0.5 }, async (session) => await session.prompt(prompt));
       
-      console.log('Raw AI response for sentiment:', response);
+      debugLog('Raw AI response for sentiment:', response);
       
       // Parse JSON
       const jsonMatch = response.match(/\{[\s\S]*\}/);
@@ -296,7 +303,7 @@ IMPORTANT: Return ONLY valid JSON. No markdown, no extra text. Ensure all quotes
 
       const response = await this.withSession({ temperature: 0.5 }, async (session) => await session.prompt(prompt));
 
-      console.log('Raw AI response:', response);
+      debugLog('Raw AI response:', response);
 
       let analysis = null;
 
