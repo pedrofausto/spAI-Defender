@@ -97,8 +97,10 @@ export class PhishingDetector {
     if (hasCredentialPressure) score += 18;
     if (hasRewardPressure) score += 10;
 
-    if (educational) score -= 18;
-    if (negated) score -= 14;
+    // Educational or negated wording must not hide credential, OTP or payment lures.
+    const hasSensitiveLure = matches.some(match => match.category === 'credential' || match.category === 'payment');
+    if (educational && !hasSensitiveLure) score -= 18;
+    if (negated && !hasSensitiveLure) score -= 14;
 
     score = Math.max(0, Math.min(100, score));
 
@@ -129,15 +131,15 @@ export class PhishingDetector {
     const combinedScore = analysis?.status === 'VALID'
       ? Math.round((baseRiskScore * 0.75) + (heuristicScore * 0.25))
       : Math.round(Math.max(baseRiskScore, heuristicScore));
-    const mergedRiskScore = analysis?.status === 'VALID'
-      ? Math.max(baseRiskScore, combinedScore)
-      : (heuristicScore >= 80 ? combinedScore : baseRiskScore);
+    // Deterministic floor: the AI may raise the risk above the heuristic level but never lower it.
+    const mergedRiskScore = Math.max(baseRiskScore, combinedScore, heuristicScore);
 
     const finalRiskScore = Math.max(Number(analysis?.finalRiskScore || baseRiskScore || 0), mergedRiskScore);
+    const clampedFinalScore = Math.max(0, Math.min(100, finalRiskScore));
     const merged = {
       ...analysis,
-      riskScore: Math.max(0, Math.min(100, mergedRiskScore)),
-      finalRiskScore: Math.max(0, Math.min(100, finalRiskScore)),
+      riskScore: clampedFinalScore,
+      finalRiskScore: clampedFinalScore,
       semanticSignals: mergedSignals,
       evidence: mergedEvidence,
       redFlags: mergedEvidence,
@@ -151,14 +153,25 @@ export class PhishingDetector {
       merged.recommendation = merged.recommendation === 'SAFE' ? 'CAUTION' : merged.recommendation;
     }
 
-    if (merged.status === 'VALID' || heuristicScore >= 80) {
+    if (merged.finalRiskScore >= 1) {
       if (merged.finalRiskScore >= 75) merged.riskLevel = 'HIGH';
       else if (merged.finalRiskScore >= 50) merged.riskLevel = 'MEDIUM_HIGH';
       else if (merged.finalRiskScore >= 30) merged.riskLevel = 'MEDIUM';
-      else if (merged.finalRiskScore >= 1) merged.riskLevel = 'LOW';
-    } else {
+      else merged.riskLevel = 'LOW';
+    } else if (merged.status !== 'VALID') {
       merged.riskLevel = analysis?.riskLevel || 'UNKNOWN';
       merged.classification = analysis?.classification || 'INCONCLUSIVE';
+    }
+
+    // A low or SAFE verdict without AI evidence cannot stand against a strong heuristic signal.
+    const modelEvidenceCount = Array.isArray(analysis?.evidence)
+      ? analysis.evidence.length
+      : (Array.isArray(analysis?.redFlags) ? analysis.redFlags.length : 0);
+    const lowVerdict = analysis?.classification === 'SAFE' || analysis?.riskLevel === 'LOW';
+    if (lowVerdict && modelEvidenceCount === 0 && heuristicScore >= 55) {
+      merged.status = 'INCONCLUSIVE';
+      merged.classification = 'INCONCLUSIVE';
+      if (merged.recommendation === 'SAFE') merged.recommendation = 'CAUTION';
     }
 
     return merged;
@@ -564,11 +577,14 @@ Provide response as JSON with exactly these top-level fields:
       }
 
       // Step 4: Use hybrid scorer to combine all analyses (image analysis disabled)
+      const quickResult = this.quickDetect(content);
+      const heuristicScore = quickResult.score;
       const hybridScore = this.hybridScorer.calculateHybridScore({
         sentimentAnalysis,
         phishingAnalysis: {
           riskScore: phishingAnalysis.riskScore / 100,
           confidence: phishingAnalysis.confidence / 100,
+          heuristicScore: heuristicScore / 100,
           isPhishing: phishingAnalysis.isPhishing,
           redFlags: phishingAnalysis.redFlags,
           indicators: phishingAnalysis.indicators
@@ -577,9 +593,17 @@ Provide response as JSON with exactly these top-level fields:
         linguisticFeatures
       });
 
+      // Deterministic floor: hybrid weighting must not reduce risk below the heuristic level.
+      const floredFinalRiskScore = Math.max(hybridScore.finalRiskScore, heuristicScore);
+
       // Combine all analysis components
       return {
         ...hybridScore,
+        finalRiskScore: floredFinalRiskScore,
+        riskLevel: floredFinalRiskScore > hybridScore.finalRiskScore
+          ? this.riskLevelForScore(floredFinalRiskScore)
+          : hybridScore.riskLevel,
+        heuristicScore,
         status: phishingAnalysis.status || 'INCONCLUSIVE',
         classification: phishingAnalysis.classification || 'INCONCLUSIVE',
         confidence: phishingAnalysis.confidence ?? hybridScore.confidence ?? 0,
@@ -604,6 +628,18 @@ Provide response as JSON with exactly these top-level fields:
         error: error.message
       };
     }
+  }
+
+  /**
+   * Map a 0-100 final score to the hybrid risk level scale.
+   * Kept local so the advanced path does not depend on HybridScorer internals.
+   */
+  riskLevelForScore(score) {
+    if (score >= 90) return 'CRITICAL';
+    if (score >= 75) return 'HIGH';
+    if (score >= 50) return 'MEDIUM_HIGH';
+    if (score >= 30) return 'MEDIUM';
+    return 'LOW';
   }
 
   /**

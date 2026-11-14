@@ -35,7 +35,11 @@ export class HybridScorer {
 
     // Extract component scores
     const sentimentScore = this.normalizeScore(sentimentAnalysis.manipulationScore, sentimentAnalysis.riskAssessment?.score);
-    const phishingScore = this.normalizeScore(phishingAnalysis.riskScore, phishingAnalysis.confidence);
+    // AI confidence may lower the AI contribution, but never below the deterministic heuristic contribution.
+    const phishingScore = Math.max(
+      this.normalizeScore(phishingAnalysis.riskScore, phishingAnalysis.confidence),
+      this.normalizeScore(phishingAnalysis.heuristicScore)
+    );
     const imageScore = this.normalizeScore(imageAnalysis.riskScore, imageAnalysis.maliciousCount);
     const linguisticScore = this.normalizeScore(linguisticFeatures.overall?.score, linguisticFeatures.overall?.anomalyScore);
 
