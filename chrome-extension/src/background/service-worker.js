@@ -47,11 +47,50 @@ function cacheResult(key, result) {
   console.log(`💾 Cached analysis result (cache size: ${analysisCache.size()}/50)`);
 }
 
+// Set to true only for local debugging. Logs that may contain page text or chat names are gated behind it.
+const DEBUG = false;
+
+function debugLog(...args) {
+  if (DEBUG) console.log(...args);
+}
+
 const CONTENT_SCRIPT_FILE = 'src/content/content-script.js';
 const CONTENT_SCRIPT_PING = { type: 'SPAI_PING' };
 
 function isInjectableTabUrl(url = '') {
   return /^https?:\/\//i.test(String(url || ''));
+}
+
+const WHATSAPP_WEB_ORIGIN = 'https://web.whatsapp.com';
+
+// Requests that read stored private data or act on an arbitrary tab id. Only extension pages may send them.
+const PRIVILEGED_MESSAGE_TYPES = new Set([
+  'GET_TAB_CONTENT',
+  'EXTRACT_WHATSAPP_MESSAGES',
+  'EXTRACT_TELEGRAM_MESSAGES',
+  'FORCE_WHATSAPP_REANALYSIS',
+  'GET_LAST_WHATSAPP_SNAPSHOT',
+  'GET_WHATSAPP_CHAT_HISTORY'
+]);
+
+function isExtensionPageSender(sender) {
+  if (!sender || sender.tab) return false;
+  if (sender.id !== chrome.runtime.id) return false;
+  return typeof sender.url === 'string' && sender.url.startsWith(chrome.runtime.getURL(''));
+}
+
+function originOf(url) {
+  try {
+    return new URL(String(url || '')).origin;
+  } catch (_) {
+    return '';
+  }
+}
+
+function isWhatsAppTabSender(sender) {
+  if (!sender?.tab?.id) return false;
+  const origin = sender.origin || originOf(sender.url);
+  return origin === WHATSAPP_WEB_ORIGIN;
 }
 
 async function hasResponsiveContentScript(tabId) {
@@ -115,6 +154,16 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   console.log('Message received:', request.type);
 
+  if (PRIVILEGED_MESSAGE_TYPES.has(request.type) && !isExtensionPageSender(sender)) {
+    sendResponse({ error: 'Unauthorized sender' });
+    return false;
+  }
+
+  if (request.type === 'WHATSAPP_CHAT_SNAPSHOT' && !isWhatsAppTabSender(sender)) {
+    sendResponse({ error: 'Unauthorized sender' });
+    return false;
+  }
+
   switch (request.type) {
     case 'CHECK_AI_AVAILABILITY':
       handleCheckAvailability(sendResponse);
@@ -137,7 +186,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true; // Async response
 
     case 'DETECT_PHISHING':
-      handlePhishingDetection(request.data, sendResponse);
+      handlePhishingDetection(request.data, sendResponse, sender);
       return true; // Async response
 
     case 'ANALYZE_SENTIMENT':
@@ -291,6 +340,10 @@ async function handleGetTabContent(tabId, sendResponse) {
 
     // Get tab info to check URL
     const tab = await chrome.tabs.get(tabId);
+    if (!isInjectableTabUrl(tab?.url)) {
+      sendResponse({ success: false, error: 'UNSUPPORTED_PAGE' });
+      return;
+    }
     console.log('Extracting content for tab:', tabId, tab.url);
 
     await ensureContentScriptInjected(tabId, tab?.url || '');
@@ -451,7 +504,6 @@ function extractPageContent() {
     url: window.location.href,
     text: document.body.innerText,
     bodyText: document.body.innerText,
-    html: document.body.innerHTML,
     headings: Array.from(document.querySelectorAll('h1, h2, h3')).map(h => ({
       level: h.tagName,
       text: h.textContent.trim()
@@ -619,9 +671,9 @@ async function recordPhishingMetric(data, analysis, startedAt, statusOverride = 
   }
 }
 
-async function handlePhishingDetection(data, sendResponse) {
+async function handlePhishingDetection(data, sendResponse, sender = null) {
   const startedAt = Date.now();
-  console.log('🔵 handlePhishingDetection called with data:', data?.content?.substring(0, 50) || 'no content');
+  debugLog('🔵 handlePhishingDetection called with data:', data?.content?.substring(0, 50) || 'no content');
   try {
     // Extract content properly - data has {url, text, title, images}
     const url = data.url || '';
@@ -649,14 +701,18 @@ async function handlePhishingDetection(data, sendResponse) {
 
     console.log('🔵 Calling phishingDetector.detectPhishing...');
     const analysis = await phishingDetector.detectPhishing(url, content, title, images);
-    console.log('🔵 phishingDetector returned full analysis:', JSON.stringify(analysis, null, 2));
+    debugLog('🔵 phishingDetector returned full analysis:', JSON.stringify(analysis, null, 2));
     
-    // Show badge if high risk
+    // Show badge if high risk, on the tab that sent the request when known
     if (analysis.riskScore > 50) {
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (tabs[0]) {
+      let badgeTabId = sender?.tab?.id ?? null;
+      if (!badgeTabId) {
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        badgeTabId = tabs[0]?.id ?? null;
+      }
+      if (badgeTabId) {
         try {
-          await chrome.tabs.sendMessage(tabs[0].id, {
+          await chrome.tabs.sendMessage(badgeTabId, {
             type: 'SHOW_SECURITY_BADGE',
             data: {
               riskLevel: analysis.riskLevel,
@@ -1096,17 +1152,17 @@ async function handleWhatsAppChatSnapshot(data, sender, sendResponse) {
       content: data.content
     };
 
-    const existing = await chrome.storage.local.get([WHATSAPP_CHAT_HISTORY_KEY]);
+    const existing = await chrome.storage.session.get([WHATSAPP_CHAT_HISTORY_KEY]);
     const mergedHistory = mergeWhatsAppChatHistory(existing[WHATSAPP_CHAT_HISTORY_KEY] || [], snapshot);
     const { recentChats, dangerousChats } = buildWhatsAppChatHistoryViews(mergedHistory);
     const retainedHistory = trimWhatsAppChatHistory(mergedHistory);
 
-    await chrome.storage.local.set({
+    await chrome.storage.session.set({
       lastWhatsAppSnapshot: snapshot,
       [WHATSAPP_CHAT_HISTORY_KEY]: retainedHistory
     });
 
-    console.log(`✅ WhatsApp snapshot stored (trigger: ${data.trigger}, chat: ${data.chatName})`);
+    debugLog(`✅ WhatsApp snapshot stored (trigger: ${data.trigger}, chat: ${data.chatName})`);
     sendResponse({ success: true, historySize: recentChats.length, dangerousSize: dangerousChats.length });
   } catch (error) {
     console.error('Error storing WhatsApp snapshot:', error);
@@ -1122,7 +1178,7 @@ async function handleWhatsAppChatSnapshot(data, sender, sendResponse) {
  */
 async function handleGetLastWhatsAppSnapshot(sendResponse) {
   try {
-    const result = await chrome.storage.local.get('lastWhatsAppSnapshot');
+    const result = await chrome.storage.session.get('lastWhatsAppSnapshot');
 
     if (result.lastWhatsAppSnapshot) {
       sendResponse({
@@ -1146,7 +1202,7 @@ async function handleGetLastWhatsAppSnapshot(sendResponse) {
 
 async function handleGetWhatsAppChatHistory(sendResponse) {
   try {
-    const result = await chrome.storage.local.get([WHATSAPP_CHAT_HISTORY_KEY]);
+    const result = await chrome.storage.session.get([WHATSAPP_CHAT_HISTORY_KEY]);
     const chats = result[WHATSAPP_CHAT_HISTORY_KEY] || [];
     const { recentChats, dangerousChats } = buildWhatsAppChatHistoryViews(chats);
     sendResponse({ success: true, chats: recentChats, recentChats, dangerousChats });
@@ -1155,6 +1211,18 @@ async function handleGetWhatsAppChatHistory(sendResponse) {
     sendResponse({ success: false, error: error.message, chats: [], recentChats: [], dangerousChats: [] });
   }
 }
+// WhatsApp snapshots now live in session storage only. Remove copies left by earlier versions.
+// This runs on every service worker start, which covers install and update.
+async function removeLegacyWhatsAppStorage() {
+  try {
+    await chrome.storage.local.remove(['lastWhatsAppSnapshot', WHATSAPP_CHAT_HISTORY_KEY]);
+  } catch (error) {
+    console.warn('Legacy WhatsApp storage cleanup failed:', error?.message || error);
+  }
+}
+
+removeLegacyWhatsAppStorage();
+
 console.log('spAI-Defender service worker loaded');
 
 
