@@ -1,4 +1,4 @@
-import { LOCAL_MESSAGE_RISK_PATTERNS } from '../utils/message-risk-patterns.js';
+import { evaluateLocalMessageRisk, isLocalPrehighlightCandidate, localRulesSeeLowRisk } from './local-prehighlight.js';
 
 (() => {
 const SPAI_CONTENT_SCRIPT_RUNTIME_KEY = '__spaiDefenderContentScript';
@@ -528,58 +528,6 @@ function debugLog(...args) {
   if (DEBUG) console.log(...args);
 }
 
-function evaluateLocalMessageRisk(text = '') {
-  if (!text || typeof text !== 'string') {
-    return { score: 0, severity: null, signals: [], matches: [], context: { educational: false, negated: false } };
-  }
-
-  const content = String(text);
-  const matches = [];
-  const signals = new Set();
-  let score = 0;
-
-  const applyCategory = (category, delta, signal = null) => {
-    for (const pattern of LOCAL_MESSAGE_RISK_PATTERNS[category] || []) {
-      if (!pattern.test(content)) continue;
-      matches.push({ category, pattern: pattern.source });
-      score += delta;
-      if (signal) signals.add(signal);
-    }
-  };
-
-  applyCategory('credential', 24, 'credential_request');
-  applyCategory('urgency', 10, 'urgent_action');
-  applyCategory('authority', 14, 'authority_impersonation');
-  applyCategory('reward', 16, 'financial_reward');
-  applyCategory('payment', 18, 'payment_request');
-  applyCategory('linkAction', 12, 'link_action');
-
-  const uniqueCategories = new Set(matches.map(match => match.category)).size;
-  if (uniqueCategories >= 3) score += 18;
-  else if (uniqueCategories === 2) score += 8;
-
-  const hasCredentialPressure = signals.has('credential_request') && signals.has('urgent_action');
-  const hasRewardPressure = signals.has('financial_reward') && signals.has('link_action');
-  if (hasCredentialPressure) score += 18;
-  if (hasRewardPressure) score += 10;
-
-  const educational = (LOCAL_MESSAGE_RISK_PATTERNS.educational || []).some(pattern => pattern.test(content));
-  const negated = (LOCAL_MESSAGE_RISK_PATTERNS.negation || []).some(pattern => pattern.test(content));
-  if (educational) score -= 18;
-  if (negated) score -= 14;
-
-  score = Math.max(0, Math.min(100, score));
-  const severity = score >= 80 ? 'high' : score >= 45 ? 'medium' : null;
-
-  return {
-    score,
-    severity,
-    signals: Array.from(signals),
-    matches,
-    context: { educational, negated }
-  };
-}
-
 function applyLocalPendingHighlight(message, localRisk) {
   if (!message?.element) return;
   if (!localRisk?.severity) return;
@@ -600,8 +548,7 @@ function applyLocalPendingHighlight(message, localRisk) {
  */
 function clearMessageHighlightIfLocalRulesAgree(message) {
   if (!message?.element) return;
-  const localRisk = evaluateLocalMessageRisk(message.text);
-  if (localRisk.severity) return;
+  if (!localRulesSeeLowRisk(message.text)) return;
   removeMessageHighlight(message.element);
 }
 
@@ -623,6 +570,7 @@ function prehighlightVisibleMessagesWithLocalHeuristics() {
       if (message.element.dataset.spaiAnalyzed === 'true') return;
       if (message.element.dataset.spaiPendingLocal === 'true') return;
       if (message.element.dataset.spaiHighlightSeverity === 'high') return;
+      if (!isLocalPrehighlightCandidate(message)) return;
 
       const localRisk = evaluateLocalMessageRisk(message.text);
       if (!localRisk.severity) return;
@@ -1258,7 +1206,9 @@ async function analyzeAndHighlightMessages(options = {}) {
                     // RETRY-SAFE: Mark as pending (not 'true' yet) to allow retry on failures
                     message.element.dataset.spaiAnalyzed = 'pending';
 
-                    const localRisk = evaluateLocalMessageRisk(message.text);
+                    const localRisk = isLocalPrehighlightCandidate(message)
+                        ? evaluateLocalMessageRisk(message.text)
+                        : { score: 0, severity: null };
                     if (localRisk.severity) {
                         applyLocalPendingHighlight(message, localRisk);
                     }

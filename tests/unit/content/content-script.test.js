@@ -306,7 +306,7 @@ describe('content script message handling', () => {
     document.body.innerHTML = `
       <div id="main" role="main">
         <header><span dir="auto" title="Security Team">Security Team</span></header>
-        <div role="row" data-id="pending-risk"><div class="message-in"><div class="copyable-text" data-pre-plain-text="[10:00] Unknown:"><span class="selectable-text"><span>Prize claim available. Click here.</span></span></div></div></div>
+        <div role="row" data-id="pending-risk"><div class="message-in"><div class="copyable-text" data-pre-plain-text="[10:00] Unknown:"><span class="selectable-text"><span>Oi mae, troquei de numero, esse e meu numero novo. Preciso que voce faca um pix de 800 reais urgente pra mim, depois te devolvo.</span></span></div></div></div>
       </div>
     `;
     document.body.innerText = document.body.textContent;
@@ -335,7 +335,7 @@ describe('content script message handling', () => {
     document.body.innerHTML = `
       <div id="main" role="main">
         <header><span dir="auto" title="Security Team">Security Team</span></header>
-        <div role="row" data-id="local-only"><div class="message-in"><div class="copyable-text" data-pre-plain-text="[10:00] Unknown:"><span class="selectable-text"><span>Prize claim available. Click here.</span></span></div></div></div>
+        <div role="row" data-id="local-only"><div class="message-in"><div class="copyable-text" data-pre-plain-text="[10:00] Unknown:"><span class="selectable-text"><span>Oi mae, troquei de numero, esse e meu numero novo. Preciso que voce faca um pix de 800 reais urgente pra mim, depois te devolvo.</span></span></div></div></div>
       </div>
     `;
     document.body.innerText = document.body.textContent;
@@ -352,6 +352,36 @@ describe('content script message handling', () => {
 
     const bubble = document.querySelector('[data-id="local-only"] .message-in');
     expect(bubble.classList.contains('spai-suspicious-message')).toBe(true);
+    delete global.__contentRuntimeResponder;
+  });
+
+  test.each([
+    ['bank warning (local rules see low risk)', 'in', 'Banco: nunca pedimos seu codigo, senha ou token por mensagem. Nao compartilhe com ninguem.'],
+    ['outgoing scam-looking message', 'out', 'Oi mae, troquei de numero, esse e meu numero novo. Preciso que voce faca um pix de 800 reais urgente pra mim, depois te devolvo.']
+  ])('does not locally pre-highlight a %s', async (_label, direction, text) => {
+    setTestUrl('https://web.whatsapp.com/');
+    document.body.innerHTML = `
+      <div id="main" role="main">
+        <header><span dir="auto" title="Contact">Contact</span></header>
+        <div role="row" data-id="no-pre"><div class="message-${direction}"><div class="copyable-text" data-pre-plain-text="[10:00] Someone:"><span class="selectable-text"><span>${text}</span></span></div></div></div>
+      </div>
+    `;
+    document.body.innerText = document.body.textContent;
+    global.__contentRuntimeResponder = message => {
+      if (message.type !== 'DETECT_PHISHING') return { success: true };
+      return new Promise(resolve => setTimeout(() => resolve({
+        success: true,
+        analysis: { status: 'VALID', classification: 'SAFE', riskLevel: 'LOW', riskScore: 2, confidence: 90 }
+      }), 1200));
+    };
+
+    await importContentScript();
+    await new Promise(resolve => setTimeout(resolve, 700));
+
+    const bubble = document.querySelector(`[data-id="no-pre"] .message-${direction}`);
+    expect(bubble.classList.contains('spai-suspicious-message')).toBe(false);
+    expect(bubble.classList.contains('spai-malicious-message')).toBe(false);
+    await new Promise(resolve => setTimeout(resolve, 1300));
     delete global.__contentRuntimeResponder;
   });
 

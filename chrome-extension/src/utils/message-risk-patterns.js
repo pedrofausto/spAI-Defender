@@ -58,21 +58,3 @@ export const QUICK_DETECT_PATTERNS = Object.freeze({
   educational: EDUCATIONAL_PATTERNS,
   negation: NEGATION_PATTERNS
 });
-
-/**
- * Category lists used by the content script for instant local pre-highlights.
- * Account threat wording is folded into the authority category here.
- */
-export const LOCAL_MESSAGE_RISK_PATTERNS = Object.freeze({
-  credential: Object.freeze([...CREDENTIAL_PATTERNS, /login/i, /sign in/i]),
-  urgency: Object.freeze([...URGENCY_PATTERNS, /em at[eé] 24 horas/i, /within 24 hours/i]),
-  authority: Object.freeze([
-    ...AUTHORITY_PATTERNS,
-    /conta.*bloquead[ao]/i, /account.*(blocked|suspend)/i, /atividade.*suspeita/i, /suspicious.*activity/i
-  ]),
-  reward: Object.freeze([...REWARD_PATTERNS, /bonus/i, /claim/i]),
-  payment: PAYMENT_PATTERNS,
-  linkAction: LINK_ACTION_PATTERNS,
-  educational: EDUCATIONAL_PATTERNS,
-  negation: NEGATION_PATTERNS
-});
