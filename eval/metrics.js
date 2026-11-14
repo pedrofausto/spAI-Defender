@@ -85,13 +85,15 @@ export function parseJsonl(text) {
       errors.push(`line ${index + 1}: label must be "scam" or "legit"`);
       return;
     }
-    records.push({
+    const parsed = {
       id: record.id == null ? `line-${index + 1}` : String(record.id),
       text: record.text,
       label: record.label,
       lang: record.lang == null ? 'unknown' : String(record.lang),
       source: record.source == null ? 'unknown' : String(record.source)
-    });
+    };
+    if (record.category != null && record.category !== '') parsed.category = String(record.category);
+    records.push(parsed);
   });
   return { records, errors };
 }
