@@ -281,9 +281,8 @@ describe('content script message handling', () => {
     document.querySelector('#main').appendChild(document.createElement('div'));
     await new Promise(resolve => setTimeout(resolve, 650));
 
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'CONTENT_SCRIPT_READY',
-      url: 'https://web.whatsapp.com/'
+    expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({
+      type: 'CONTENT_SCRIPT_READY'
     }));
     expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
       type: 'WHATSAPP_CHAT_SNAPSHOT',
@@ -384,6 +383,61 @@ describe('content script message handling', () => {
     expect(bubble.classList.contains('spai-suspicious-message')).toBe(false);
     delete global.__contentRuntimeResponder;
   });
+  test('keeps the local pre-highlight when the AI result is safe but local rules still flag the message', async () => {
+    Object.defineProperty(window, 'location', {
+      value: new URL('https://web.whatsapp.com/'),
+      configurable: true
+    });
+    document.body.innerHTML = `
+      <div id="main" role="main">
+        <header><span dir="auto" title="Security Team">Security Team</span></header>
+        <div role="row" data-id="local-only"><div class="message-in"><div class="copyable-text" data-pre-plain-text="[10:00] Unknown:"><span class="selectable-text"><span>Prize claim available. Click here.</span></span></div></div></div>
+      </div>
+    `;
+    document.body.innerText = document.body.textContent;
+    global.__contentRuntimeResponder = message => {
+      if (message.type !== 'DETECT_PHISHING') return { success: true };
+      return {
+        success: true,
+        analysis: { status: 'VALID', classification: 'SAFE', riskLevel: 'LOW', riskScore: 3, confidence: 90 }
+      };
+    };
+
+    await importContentScript();
+    await new Promise(resolve => setTimeout(resolve, 1200));
+
+    const bubble = document.querySelector('[data-id="local-only"] .message-in');
+    expect(bubble.classList.contains('spai-suspicious-message')).toBe(true);
+    delete global.__contentRuntimeResponder;
+  });
+
+  test('does not log WhatsApp message text while analyzing messages', async () => {
+    Object.defineProperty(window, 'location', {
+      value: new URL('https://web.whatsapp.com/'),
+      configurable: true
+    });
+    document.body.innerHTML = `
+      <div id="main" role="main">
+        <header><span dir="auto" title="Security Team">Security Team</span></header>
+        <div role="row" data-id="private"><div class="message-in"><div class="copyable-text" data-pre-plain-text="[10:00] Unknown:"><span class="selectable-text"><span>PRIVATE-MESSAGE-TEXT-ZQ claim your prize</span></span></div></div></div>
+      </div>
+    `;
+    document.body.innerText = document.body.textContent;
+    global.__contentRuntimeResponder = message => {
+      if (message.type !== 'DETECT_PHISHING') return { success: true };
+      return { success: true, analysis: { status: 'VALID', classification: 'SAFE', riskLevel: 'LOW', riskScore: 3, confidence: 90 } };
+    };
+    const logSpy = jest.spyOn(console, 'log');
+
+    await importContentScript();
+    await new Promise(resolve => setTimeout(resolve, 1200));
+
+    const logged = logSpy.mock.calls.map(args => args.map(String).join(' ')).join('\n');
+    expect(logged).not.toContain('PRIVATE-MESSAGE-TEXT-ZQ');
+    logSpy.mockRestore();
+    delete global.__contentRuntimeResponder;
+  });
+
   test('uses amber outline for medium-risk WhatsApp messages without escalating to malicious red', async () => {
     Object.defineProperty(window, 'location', {
       value: new URL('https://web.whatsapp.com/'),

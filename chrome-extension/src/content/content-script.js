@@ -487,13 +487,6 @@ function init() {
     return true; // Keep channel open for async response
   });
 
-  // Notify background that content script is ready
-  chrome.runtime.sendMessage({
-    type: 'CONTENT_SCRIPT_READY',
-    url: window.location.href,
-    title: document.title
-  });
-
   // User request: remove the top-left SecurityBadge widget
   try {
     securityBadge.remove();
@@ -1792,6 +1785,13 @@ const LOCAL_MESSAGE_RISK_PATTERNS = {
   ]
 };
 
+// Set to true only for local debugging. Logs that include WhatsApp message text are gated behind it.
+const DEBUG = false;
+
+function debugLog(...args) {
+  if (DEBUG) console.log(...args);
+}
+
 function evaluateLocalMessageRisk(text = '') {
   if (!text || typeof text !== 'string') {
     return { score: 0, severity: null, signals: [], matches: [], context: { educational: false, negated: false } };
@@ -1856,6 +1856,17 @@ function applyLocalPendingHighlight(message, localRisk) {
       message.element.dataset.spaiPendingLocalSeverity = localRisk.severity;
     }
   });
+}
+
+/**
+ * An AI result that is not a validated threat must not remove a local rule-based pre-highlight.
+ * The highlight is cleared only when local rules agree the message is low risk.
+ */
+function clearMessageHighlightIfLocalRulesAgree(message) {
+  if (!message?.element) return;
+  const localRisk = evaluateLocalMessageRisk(message.text);
+  if (localRisk.severity) return;
+  removeMessageHighlight(message.element);
 }
 
 function clearLocalPendingHighlightState(element) {
@@ -1967,7 +1978,7 @@ function reapplyCachedHighlights(messages) {
     messages.forEach((m) => {
       const cached = getCachedRiskForMessage(m);
       if (!cached?.highlightSeverity) {
-        removeMessageHighlight(m.element);
+        clearMessageHighlightIfLocalRulesAgree(m);
         return;
       }
 
@@ -2518,7 +2529,7 @@ async function analyzeAndHighlightMessages(options = {}) {
 
                     // Enhanced debugging: Log message being analyzed
                     const msgPreview = message.text.substring(0, 50) + (message.text.length > 50 ? '...' : '');
-                    console.log(`🔍 Analyzing [${message.direction}]: "${msgPreview}"`);
+                    debugLog(`🔍 Analyzing [${message.direction}]: "${msgPreview}"`);
                     if (localRisk.severity) {
                         console.log(`⚡ Local heuristic pre-highlight: ${localRisk.severity} (${localRisk.score})`);
                     }
@@ -2593,7 +2604,7 @@ async function analyzeAndHighlightMessages(options = {}) {
                             });
                             bumpActiveChatRiskLevel(highlightSeverity === 'high' ? 'high' : 'medium');
                         } else {
-                            removeMessageHighlight(message.element);
+                            clearMessageHighlightIfLocalRulesAgree(message);
                         }
                         analyzedCount++;
                     } else {
@@ -2732,7 +2743,7 @@ async function analyzeCurrentWhatsAppChat() {
                 if (isValidatedMaliciousAnalysis(response.analysis)) {
                     highlightSuspiciousMessage(message.element, riskScore, [], message.textElement);
                 } else {
-                    removeMessageHighlight(message.element);
+                    clearMessageHighlightIfLocalRulesAgree(message);
                 }
             }
         }
