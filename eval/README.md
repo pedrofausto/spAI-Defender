@@ -43,3 +43,11 @@ Lines that are not valid JSON, have no text or have any other label are skipped 
 ## Tests
 
 `tests/unit/eval/metrics.test.js` covers the metric computations, JSONL parsing and error ranking in `eval/metrics.js`.
+
+## FraudWhatsApp.Br and FraudTelegram.Br
+
+These Brazilian datasets (SBSeg 2023, LSBD/UFC) are not public and must be requested from the authors. Run `npm run eval:fetch-fraud-br` without input to see the instructions. After placing the CSV files in `data/fraud-br/raw/`, run `npm run eval:fetch-fraud-br -- --text-column <column> --label-column <column> --positive <values>` to convert them into JSONL in `data/fraud-br/`. The `data/` folder is gitignored and its contents must never be committed, because the messages may contain personal data protected by the LGPD. The script makes no network calls. `tests/unit/eval/fraud-br-converter.test.js` covers the converter with a synthetic CSV.
+
+## Curated Portuguese set
+
+`datasets/ptbr-curated.jsonl` holds 300 synthetic Brazilian Portuguese chat messages with hard negatives. See `datasets/README.md`.
