@@ -4,7 +4,7 @@ This folder measures how well the deterministic local detection path separates s
 
 ## What is evaluated
 
-Each message is scored with `PhishingDetector.quickDetect` from `chrome-extension/src/utils/phishing-detector.js`. That is the lexicon-based heuristic scorer, built on the shared keyword lexicon in `chrome-extension/src/utils/message-risk-patterns.js`. A message is predicted as scam when its score is at or above the threshold (55 by default, which matches the boundary of the MEDIUM level in `quickDetect`).
+Each message is scored with `PhishingDetector.quickDetect` from `chrome-extension/src/utils/phishing-detector.js`. That is the deterministic scorer built on the scam-pattern rules in `chrome-extension/src/utils/scam-rules.js` (see "Rule design" below). The older keyword lists in `message-risk-patterns.js` are still used by the content script pre-highlight but no longer by `quickDetect`. A message is predicted as scam when its score is at or above the threshold (55 by default, which matches the boundary of the MEDIUM level in `quickDetect`).
 
 Gemini Nano results are not part of this harness, because the built-in model only runs inside Chrome.
 
@@ -14,6 +14,8 @@ Gemini Nano results are not part of this harness, because the built-in model onl
 - Add `--threshold 80` to change the decision threshold.
 - Add `--top 10` to list more false positives and false negatives.
 - Add `--json` to print machine-readable output instead of the text report.
+- Add `--split tune` or `--split holdout` to evaluate one side of the split stored next to the dataset (`<name>.split.json`), or pass `--split-file <path>`. Holdout message text is hidden in the report unless `--show-text` is given.
+- When records carry a `category` field, the report also lists per-category recall (scam categories) or false-positive rate (legit categories).
 
 The report prints precision, recall, F1 and false-positive rate overall and for each language, followed by the highest-scoring false positives and the lowest-scoring false negatives.
 
@@ -51,3 +53,34 @@ These Brazilian datasets (SBSeg 2023, LSBD/UFC) are not public and must be reque
 ## Curated Portuguese set
 
 `datasets/ptbr-curated.jsonl` holds 300 synthetic Brazilian Portuguese chat messages with hard negatives. See `datasets/README.md`.
+
+## Tune and holdout split
+
+`datasets/ptbr-curated.split.json` was produced by `node eval/scripts/make-split.mjs eval/datasets/ptbr-curated.jsonl` (seed 20261114). Within each category and label, ids are ordered by a seeded hash and 60 percent go to `tune`, the rest to `holdout`: 180 and 120 messages, 9 and 6 per category. Rules are designed only against the tune split. The holdout split is run once after the rules are frozen, and its message text should not be read.
+
+## Rule design
+
+The scorer in `chrome-extension/src/utils/scam-rules.js` works in three layers.
+
+Normalization and cues:
+- Text is normalized with Unicode NFD, diacritics are stripped, everything is lowercased and apostrophes are dropped, so "Código" and "codigo" match the same pattern.
+- URLs are replaced by a neutral token before word matching, so host names such as "example" or "premio" do not trigger word cues. URLs are inspected separately.
+- Atomic cues use word boundaries, so "shopping" never matches "pin" and "pixel" never matches "pix". Cues cover Portuguese and English: new number or identity change, money request, request to share a code or password, request for personal or bank data, urgency, threat, payment or fee demand, link or click wording, authority names, remote access and safe-account procedures, bank pretexts, paid-task jobs, guaranteed returns, prizes, deliveries, romance stories, extortion, PIX refund or new-key pretexts, fake app features, warnings and educational wording.
+
+Negation:
+- For request-type cues, a match is ignored when a negator (nao, nunca, jamais, nem, ninguem, never, not, dont, nobody) appears within four words before it in the same clause, or when it is followed by "a ninguem", "com ninguem", "with anyone" and similar.
+- A comma or a contrastive word (mas, but, porem, however) starts a new clause, so "do not click, but pay now" still counts as a payment request.
+- A shorter pattern inside the span of a negated longer one is negated too.
+
+Families and scoring:
+- Twelve families combine cues into scam patterns: identity change plus money request, share a code, credential or data request with link or pressure, urgency or threat plus payment, fake bank central, task job plus deposit, investment with guaranteed return or withdrawal fee, prize plus fee or link, delivery plus fee, romance or extortion plus money, PIX pretext, and fake app or support threat.
+- Each family scores only its strongest matching rule, which caps it. Families are combined with diminishing weight: the strongest counts in full, the second at half and the rest at a quarter.
+- With no family match, isolated cues add only a few points and cannot reach the alert threshold of 55.
+- Structural link findings (shortener, raw IP, punycode, lure words in a hyphenated host, link text that shows a different domain, and the non-resolvable `.invalid` domain at half weight) add up to 20 points, and at most 15 when no family matched.
+- Educational wording subtracts 18, warning wording ("pode ser golpe", "nunca pedimos", "desconfie") subtracts 20 and official-channel wording subtracts 10, but only when no un-negated code, credential, fee, remote-access, identity-change or pressure-payment signal is present.
+- Every matched family and link finding produces an evidence string, which `quickDetect` returns in `matches`, `suspiciousPhrases` and `evidence`.
+
+Known limits:
+- The same author wrote the curated set and the rules, so tune results overstate real accuracy. The drop from tune to holdout shows how much the rules fit the wording of the tune messages.
+- Messages that carry no request yet (for example "this is my new number, save it") are left to the AI classifier on purpose, because the legit family messages look the same.
+- The `.invalid` link signal reflects the reserved domain used in the synthetic data and has no meaning for real traffic.
