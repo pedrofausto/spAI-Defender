@@ -224,3 +224,148 @@ describe('AIOffscreenProxy pooling contract', () => {
     expect(proxy.getPooledSession()).toBeNull();
   });
 });
+
+describe('AIOffscreenProxy offscreen document detection', () => {
+  const OFFSCREEN_FULL_URL = 'chrome-extension://ext-id/src/offscreen/offscreen.html';
+  const SINGLE_DOCUMENT_ERROR = 'Only a single offscreen document may be created.';
+
+  function installChrome({ runtime = {}, offscreen = {} } = {}) {
+    global.chrome = {
+      runtime: {
+        sendMessage: jest.fn().mockResolvedValue({ ok: true, result: {} }),
+        getURL: jest.fn((path) => `chrome-extension://ext-id/${path}`),
+        ...runtime
+      },
+      offscreen: {
+        createDocument: jest.fn().mockResolvedValue(undefined),
+        ...offscreen
+      }
+    };
+    return global.chrome;
+  }
+
+  beforeEach(() => {
+    jest.spyOn(console, 'log').mockImplementation(() => {});
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    delete global.chrome;
+  });
+
+  test('prefers runtime.getContexts with the offscreen type and full document URL', async () => {
+    const hasDocument = jest.fn().mockResolvedValue(false);
+    const chromeMock = installChrome({
+      runtime: { getContexts: jest.fn().mockResolvedValue([{ contextType: 'OFFSCREEN_DOCUMENT' }]) },
+      offscreen: { hasDocument }
+    });
+
+    await new AIOffscreenProxy()._ensureOffscreenDocument();
+
+    expect(chromeMock.runtime.getContexts).toHaveBeenCalledWith({
+      contextTypes: ['OFFSCREEN_DOCUMENT'],
+      documentUrls: [OFFSCREEN_FULL_URL]
+    });
+    expect(hasDocument).not.toHaveBeenCalled();
+    expect(chromeMock.offscreen.createDocument).not.toHaveBeenCalled();
+  });
+
+  test('creates the document when runtime.getContexts reports no offscreen context', async () => {
+    const chromeMock = installChrome({
+      runtime: { getContexts: jest.fn().mockResolvedValue([]) }
+    });
+
+    await new AIOffscreenProxy()._ensureOffscreenDocument();
+
+    expect(chromeMock.offscreen.createDocument).toHaveBeenCalledTimes(1);
+    expect(chromeMock.offscreen.createDocument.mock.calls[0][0].url).toBe('src/offscreen/offscreen.html');
+  });
+
+  test('falls back to offscreen.hasDocument when runtime.getContexts throws', async () => {
+    const chromeMock = installChrome({
+      runtime: { getContexts: jest.fn().mockRejectedValue(new Error('getContexts unsupported')) },
+      offscreen: { hasDocument: jest.fn().mockResolvedValue(true) }
+    });
+
+    await new AIOffscreenProxy()._ensureOffscreenDocument();
+
+    expect(chromeMock.offscreen.hasDocument).toHaveBeenCalledTimes(1);
+    expect(chromeMock.offscreen.createDocument).not.toHaveBeenCalled();
+  });
+
+  test('uses offscreen.hasDocument alone when runtime.getContexts is absent', async () => {
+    const chromeMock = installChrome({
+      offscreen: { hasDocument: jest.fn().mockResolvedValue(false) }
+    });
+
+    await new AIOffscreenProxy()._ensureOffscreenDocument();
+
+    expect(chromeMock.offscreen.hasDocument).toHaveBeenCalledTimes(1);
+    expect(chromeMock.offscreen.createDocument).toHaveBeenCalledTimes(1);
+  });
+
+  test('falls back to in-memory tracking when neither detection API exists', async () => {
+    const chromeMock = installChrome();
+    const proxy = new AIOffscreenProxy();
+
+    await proxy._ensureOffscreenDocument();
+    await proxy._ensureOffscreenDocument();
+
+    expect(chromeMock.offscreen.createDocument).toHaveBeenCalledTimes(1);
+  });
+
+  test('falls back to in-memory tracking when hasDocument throws', async () => {
+    const chromeMock = installChrome({
+      offscreen: { hasDocument: jest.fn().mockRejectedValue(new Error('boom')) }
+    });
+
+    await new AIOffscreenProxy()._ensureOffscreenDocument();
+
+    expect(chromeMock.offscreen.createDocument).toHaveBeenCalledTimes(1);
+  });
+
+  test('treats the single-document error as an existing document instead of failing', async () => {
+    const chromeMock = installChrome({
+      offscreen: { createDocument: jest.fn().mockRejectedValue(new Error(SINGLE_DOCUMENT_ERROR)) }
+    });
+    const proxy = new AIOffscreenProxy();
+
+    await expect(proxy._ensureOffscreenDocument()).resolves.toBe(true);
+    await proxy._ensureOffscreenDocument();
+
+    expect(chromeMock.offscreen.createDocument).toHaveBeenCalledTimes(1);
+    expect(chromeMock.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ action: 'ping' }));
+  });
+
+  test('rethrows other creation errors and keeps the document marked as missing', async () => {
+    const chromeMock = installChrome({
+      offscreen: { createDocument: jest.fn().mockRejectedValue(new Error('disk full')) }
+    });
+    const proxy = new AIOffscreenProxy();
+
+    await expect(proxy._ensureOffscreenDocument()).rejects.toThrow('OFFSCREEN_CREATE_FAILED: disk full');
+    await expect(proxy._ensureOffscreenDocument()).rejects.toThrow('OFFSCREEN_CREATE_FAILED');
+    expect(chromeMock.offscreen.createDocument).toHaveBeenCalledTimes(2);
+  });
+
+  test('reports OFFSCREEN_UNAVAILABLE when chrome.offscreen.createDocument is missing', async () => {
+    installChrome();
+    global.chrome.offscreen = undefined;
+
+    await expect(new AIOffscreenProxy()._ensureOffscreenDocument()).rejects.toThrow('OFFSCREEN_UNAVAILABLE');
+  });
+
+  test('re-creates the document after a failed transport call in in-memory mode', async () => {
+    const chromeMock = installChrome();
+    const proxy = new AIOffscreenProxy();
+    await proxy._ensureOffscreenDocument();
+
+    chromeMock.runtime.sendMessage.mockRejectedValueOnce(new Error('Receiving end does not exist'));
+    await expect(proxy._send('summarize', {}, 1000)).rejects.toThrow('Receiving end does not exist');
+    await proxy._ensureOffscreenDocument();
+
+    expect(chromeMock.offscreen.createDocument).toHaveBeenCalledTimes(2);
+  });
+});

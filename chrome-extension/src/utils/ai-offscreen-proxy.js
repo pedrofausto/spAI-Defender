@@ -10,6 +10,8 @@ import { normalizeLanguageModelExpectations } from './ai-language-options.js';
 const OFFSCREEN_URL = 'src/offscreen/offscreen.html';
 const REQ_TYPE = 'SPAI_OFFSCREEN_AI_REQUEST';
 const PROMPT_REQUEST_TIMEOUT_MS = 190000;
+// Chrome's message when an offscreen document already exists (for example, created by another context).
+const SINGLE_OFFSCREEN_DOCUMENT_ERROR = /Only a single offscreen document may be created/i;
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -31,6 +33,10 @@ function normalizeSessionOptions(inputOptions = {}) {
   return normalizeLanguageModelExpectations(options);
 }
 
+function getOffscreenDocumentUrl() {
+  return typeof chrome?.runtime?.getURL === 'function' ? chrome.runtime.getURL(OFFSCREEN_URL) : OFFSCREEN_URL;
+}
+
 function isUnavailableStatus(availability) {
   return availability === AVAILABILITY.UNAVAILABLE;
 }
@@ -47,6 +53,7 @@ export class AIOffscreenProxy {
     this.availabilityChecked = false;
     this.aiAvailable = false;
     this._creatingOffscreen = null;
+    this._offscreenCreated = false; // in-memory state, used only when no Chrome detection API is available
     this._sessionOptions = new Map(); // sessionId -> normalized options (at least outputLanguage)
     this._sessionInflightPrompts = new Map(); // sessionId -> Promise
   }
@@ -59,7 +66,8 @@ export class AIOffscreenProxy {
       hasOffscreenCreate:
         typeof chrome !== 'undefined' && !!chrome.offscreen && typeof chrome.offscreen.createDocument === 'function',
       hasOffscreenHasDocument:
-        typeof chrome !== 'undefined' && !!chrome.offscreen && typeof chrome.offscreen.hasDocument === 'function'
+        typeof chrome !== 'undefined' && !!chrome.offscreen && typeof chrome.offscreen.hasDocument === 'function',
+      hasRuntimeGetContexts: typeof chrome !== 'undefined' && typeof chrome.runtime?.getContexts === 'function'
     };
   }
 
@@ -77,6 +85,36 @@ export class AIOffscreenProxy {
     return false;
   }
 
+  /**
+   * Detects an existing offscreen document. Order of preference:
+   * 1. runtime.getContexts (Chrome 116+), filtered to the offscreen type and this document's URL.
+   * 2. offscreen.hasDocument (Chrome 150+ per docs/chrome-ai-verified.md).
+   * 3. In-memory state of this proxy, when neither call works.
+   */
+  async _hasOffscreenDocument() {
+    if (typeof chrome.runtime?.getContexts === 'function') {
+      try {
+        const contexts = await chrome.runtime.getContexts({
+          contextTypes: ['OFFSCREEN_DOCUMENT'],
+          documentUrls: [getOffscreenDocumentUrl()]
+        });
+        return Array.isArray(contexts) && contexts.length > 0;
+      } catch (error) {
+        console.warn('[spai][ai-proxy] runtime.getContexts failed, trying offscreen.hasDocument:', error?.message || error);
+      }
+    }
+
+    if (typeof chrome.offscreen?.hasDocument === 'function') {
+      try {
+        return Boolean(await chrome.offscreen.hasDocument());
+      } catch (error) {
+        console.warn('[spai][ai-proxy] offscreen.hasDocument failed, using in-memory state:', error?.message || error);
+      }
+    }
+
+    return this._offscreenCreated;
+  }
+
   async _ensureOffscreenDocument() {
     if (this._creatingOffscreen) return this._creatingOffscreen;
 
@@ -85,12 +123,14 @@ export class AIOffscreenProxy {
       await sleep(0);
 
       const env = this._envInfo();
-      if (!env.hasOffscreenApi || !env.hasOffscreenCreate || !env.hasOffscreenHasDocument) {
+      if (!env.hasOffscreenApi || !env.hasOffscreenCreate) {
         throw new Error('OFFSCREEN_UNAVAILABLE: chrome.offscreen API is not available in this context');
       }
 
-      const has = await chrome.offscreen.hasDocument();
-      if (has) return true;
+      if (await this._hasOffscreenDocument()) {
+        this._offscreenCreated = true;
+        return true;
+      }
 
       console.log('[spai][ai-proxy] creating offscreen document…', { url: OFFSCREEN_URL });
       try {
@@ -101,13 +141,21 @@ export class AIOffscreenProxy {
             'Runs the Chrome Prompt API (LanguageModel) and Summarizer API in a document context for on-device analysis. ' +
             'None of the listed reasons names local model inference; DOM_SCRAPING is the closest available value and no DOM is scraped.'
         });
-        const ready = await this._waitForOffscreenReady();
-        if (!ready) {
-          console.warn('[spai][ai-proxy] offscreen ping not ready yet (continuing)');
-        }
+        this._offscreenCreated = true;
       } catch (e) {
-        console.error('[spai][ai-proxy] offscreen creation failed', e);
-        throw new Error(`OFFSCREEN_CREATE_FAILED: ${e?.message || String(e)}`);
+        if (SINGLE_OFFSCREEN_DOCUMENT_ERROR.test(e?.message || '')) {
+          // The document already exists, so it is usable. Treat this as success rather than a failure.
+          console.warn('[spai][ai-proxy] offscreen document already exists, reusing it');
+          this._offscreenCreated = true;
+        } else {
+          console.error('[spai][ai-proxy] offscreen creation failed', e);
+          throw new Error(`OFFSCREEN_CREATE_FAILED: ${e?.message || String(e)}`);
+        }
+      }
+
+      const ready = await this._waitForOffscreenReady();
+      if (!ready) {
+        console.warn('[spai][ai-proxy] offscreen ping not ready yet (continuing)');
       }
       return true;
     })();
@@ -143,6 +191,10 @@ export class AIOffscreenProxy {
         throw new Error(errStr || `Offscreen request failed: ${action}`);
       }
       return res.result;
+    } catch (error) {
+      // A failed call may mean the offscreen document was closed. Ask Chrome again on the next request.
+      this._offscreenCreated = false;
+      throw error;
     } finally {
       if (timeoutId) clearTimeout(timeoutId);
     }
