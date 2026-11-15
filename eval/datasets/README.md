@@ -92,3 +92,23 @@ An AI wrote this set, and an AI also wrote the first set and the rules tuned on 
 ### License
 
 Released under the MIT License of this repository (see `LICENSE` at the repository root).
+
+
+## ptbr-tune-extra.jsonl
+
+A tuning set of 154 synthetic Brazilian Portuguese chat messages: 74 labelled `scam` and 80 labelled `legit`. Fields are `id` (ptbr3-0001 to ptbr3-0154), `text`, `label`, `lang` (`pt`), `source` (`synthetic-tune-extra`) and `category`.
+
+### Method
+
+- Written before any rule change that followed the first independent validation, so a real baseline could be measured. The author had seen only aggregate, category-level findings of that validation (which legit situations produced false positives, which scam categories were missed), never its message text, and did not try to reproduce any hidden message.
+- Legit categories: scam_warning_forward (forwarded alert chains that quote scam wording), pix_friends, delivery_real, utility_real, tax_real_talk, family_logistics, rent_landlord, shared_bills and work_group.
+- Scam categories: photo_video_link_bait, qr_pix_key_swap, fake_rental_deposit, fake_exam_job_fee, compromised_friend_money, fake_charity, fake_whatsapp_support, fake_delivery, fake_bank and otp_prize_invest (code theft, fake prize fee, fake investment and withdrawal fee).
+- Links use reserved `.invalid` domains. No real people, numbers, CPFs or links.
+
+### Use and limits
+
+This set is tuning data and was iterated on, so results on it are in-sample and optimistic. It was written by the same author as the rules, so vocabulary overlap is expected.
+
+## Contamination note for ptbr-independent.jsonl
+
+The independent set has now been evaluated twice. The first run produced the baseline. The second run measured the rules after the awareness and payment-chat changes, which were designed from the aggregate category-level findings of the first run. Its second result is therefore contaminated and must be read as optimistic. Do not tune against it. The next validation should use a fresh set from a different source (different authors, or consented and anonymized real messages) that nobody has seen while designing rules.

@@ -227,3 +227,107 @@ describe('quickDetect integration', () => {
     expect(detector.quickDetect(42)).toEqual(expect.objectContaining({ score: 0, level: 'SAFE', evidence: [] }));
   });
 });
+
+describe('awareness context (forwarded warnings)', () => {
+  const warning = 'GENTE ATENÇÃO!! Está circulando um golpe: mandam mensagem dizendo que trocaram de número e pedem um pix urgente. Não caiam! Repassem pros grupos da família';
+
+  test('a forwarded warning that describes scam wording stays below the threshold', () => {
+    const result = scoreMessage(warning);
+    expect(result.awareness).toBe(true);
+    expect(result.score).toBeLessThan(THRESHOLD);
+    expect(result.evidence.some(line => line.startsWith('awareness_context'))).toBe(true);
+  });
+
+  test('wording inside quotation marks is quoted, not asked', () => {
+    const quoted = "Se alguém te mandar 'me passa o código que chegou no seu celular', é golpe, tá? Avisem os mais velhos";
+    expect(scoreMessage(quoted).score).toBeLessThan(THRESHOLD);
+    expect(scoreMessage(quoted).awareness).toBe(true);
+  });
+
+  test('describing ("eles pedem o código") differs from asking ("me manda o código")', () => {
+    const described = 'Cuidado com o golpe: eles pedem pra você passar o código do SMS e depois clonam o zap. Repassem!';
+    const asked = 'Cuidado com golpes! Para sua segurança, me manda o código que chegou por SMS agora';
+    expect(scoreMessage(described).score).toBeLessThan(THRESHOLD);
+    expect(scoreMessage(asked).score).toBeGreaterThanOrEqual(THRESHOLD);
+    expect(scoreMessage(asked).awareness).toBe(false);
+  });
+
+  test('awareness wording does not hide a direct request with a link', () => {
+    const disguised = 'ALERTA! Sua conta será excluída. Para evitar, ative a verificação pelo link https://seguranca-zap.example.invalid e digite o PIN';
+    const result = scoreMessage(disguised);
+    expect(result.awareness).toBe(false);
+    expect(result.score).toBeGreaterThanOrEqual(THRESHOLD);
+  });
+
+  test('a lone weak marker ("cuidado") does not open awareness context', () => {
+    const result = scoreMessage('Cuidado: pague agora a taxa de liberação da encomenda em https://taxa.example.invalid');
+    expect(result.awareness).toBe(false);
+    expect(result.score).toBeGreaterThanOrEqual(THRESHOLD);
+  });
+
+  test('negated advice still stays quiet ("nunca passe o código")', () => {
+    expect(families('Nunca passe o código para ninguém, golpistas pedem isso.')).not.toContain('share_code');
+  });
+});
+
+describe('legit payment chat and notices', () => {
+  test.each([
+    'Pix enviado! R$ 45 do churrasco, vê aí se caiu',
+    'Já paguei o uber, te mandei o comprovante agora há pouco',
+    'Racha da conta de ontem: 4 pessoas, total R$ 312. Fica R$ 78 cada, vou mandar o QR code do bar',
+    'Pessoal, o boleto do streaming dividido vence sexta. Cada um paga R$ 14,90 pra mim por pix',
+    'Mandei pix errado pra você agora há pouco, R$ 25, era pro Rafa. Pode me devolver quando puder? Obrigado!',
+    'Assinamos o contrato ontem na imobiliária, o depósito caução foi de dois meses e consta no contrato. Já tenho o recibo'
+  ])('receipt or shared bill stays low: %s', text => {
+    expect(scoreMessage(text).score).toBeLessThan(THRESHOLD);
+  });
+
+  test('a due date alone is not pressure', () => {
+    const reminder = 'Lembrete: sua fatura de energia vence dia 10. O valor é R$ 187,40. Você pode pagar pelo app da distribuidora ou no débito automático';
+    expect(scoreMessage(reminder).score).toBeLessThan(THRESHOLD);
+    expect(scoreMessage(reminder).cues.urgency).toBeUndefined();
+  });
+
+  test('"frete grátis" and "nada a pagar" are not a fee demand', () => {
+    const notice = 'Sua compra foi despachada. O frete grátis já foi aplicado no pedido, nada a pagar na entrega';
+    expect(scoreMessage(notice).score).toBeLessThan(THRESHOLD);
+  });
+
+  test('a PIX "mistake" refund request needs another signal to reach the threshold', () => {
+    const plain = scoreMessage('Caiu um pix por engano na sua conta, pode devolver?');
+    const pressured = scoreMessage('URGENTE: caiu um pix por engano na sua conta, devolva agora pela chave nova https://devolve.example.invalid');
+    expect(plain.score).toBeLessThan(THRESHOLD);
+    expect(pressured.score).toBeGreaterThanOrEqual(THRESHOLD);
+  });
+
+  test('"qr code" and "código de barras" are not secrets', () => {
+    expect(scoreMessage('me manda o qr code do bar').cues.shareSecret).toBeUndefined();
+    expect(scoreMessage('me manda o código de barras do boleto').cues.shareSecret).toBeUndefined();
+    expect(scoreMessage('me manda o código do SMS').cues.shareSecret).toBeDefined();
+  });
+});
+
+describe('families for the common miss categories', () => {
+  test.each([
+    ['media_bait', 'Olha essa foto sua que alguém postou 😳 https://fotos-album.example.invalid/ver'],
+    ['pix_pretext', 'Fiz um novo QR code pra receber, o antigo foi bloqueado. Faz o pix nele que a conta mudou'],
+    ['rental_deposit', 'Kitnet linda R$ 700. Quem pagar o sinal primeiro fica com ela, faço o contrato depois. Pix pra reservar'],
+    ['job_task', 'Aprovado no processo seletivo! Efetue o pagamento da taxa de admissão em até 24h para não perder a vaga'],
+    ['friend_money', 'Ei, vc pode me fazer um pix de 250 rapidinho? Meu cartão travou e preciso pagar uma coisa agora. Depois te explico'],
+    ['fake_charity', 'Campanha urgente: criança de 4 anos precisa de cirurgia. Doe qualquer valor por pix na chave abaixo, cada real salva uma vida']
+  ])('%s fires and reaches the threshold', (family, text) => {
+    const result = scoreMessage(text);
+    expect(families(text)).toContain(family);
+    expect(result.score).toBeGreaterThanOrEqual(THRESHOLD);
+    expect(result.evidence.some(line => line.startsWith(`${family}:`))).toBe(true);
+  });
+
+  test('legit lookalikes of those families stay low', () => {
+    [
+      'Vou pagar o aluguel na segunda por pix, o salário só cai no sábado. Tudo bem?',
+      'Quem ainda não pagou a vaquinha do presente da professora? Falta só a Bia e o Léo, R$ 20 cada',
+      'Consegue me fazer um pix de 50 até sexta? Meu salário cai dia 5 e aí eu te devolvo certinho',
+      'Segue a foto sua do casamento que tirei ontem, ficou linda'
+    ].forEach(text => expect(scoreMessage(text).score).toBeLessThan(THRESHOLD));
+  });
+});

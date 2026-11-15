@@ -13,6 +13,13 @@
  * - Scores come from scam-pattern families that combine cues (identity change plus money request,
  *   urgency or threat plus payment, task job plus deposit, and so on). Each family is capped, and
  *   families are summed with diminishing weight so one noisy family cannot dominate.
+ * - Awareness context: a message that talks ABOUT scams ("cuidado com o golpe", "repassem",
+ *   "esta circulando") and only quotes or describes scam wording ("eles pedem o codigo", text
+ *   inside quotation marks) is scaled down. The discount is withheld when any request cue
+ *   ("me manda o codigo", "clique", "pague a taxa") is addressed to the reader, that is, it is
+ *   neither inside quotes nor in a sentence introduced by a reporting verb ("pedem", "dizendo").
+ * - Receipts, bill sharing and utility reminders have no manipulation signal of their own: a due
+ *   date ("vence dia 10") is not pressure, and "pix errado, pode devolver?" needs an extra signal.
  * - Every matched family produces a human-readable evidence string.
  */
 
@@ -64,7 +71,8 @@ export function findAffirmed(normalized, pattern) {
 }
 
 // Shared building blocks (normalized, accent-free text).
-const SECRET = '(codigos?|code|codes|token|otp|pin|senha|senhas|password|passcode|sms)';
+// "qr code" and "codigo de barras" are payment artifacts, not secrets.
+const SECRET = '(?<!qr )(codigos?(?! de barras)|code|codes|token|otp|pin|senha|senhas|password|passcode|sms)';
 const SHARE_VERB = '(me passa|me passe|passa|passe|passar|me manda|manda|mande|mandar|envia|envie|enviar|informe|informa|informar|informando|repasse|repassa|repassar|responda com|responder com|confirme|confirmar|digite|digitar|compartilhe|compartilhar|fala|diga|validar|valide|send|share|forward|tell me|give me|reply with|enter|type)';
 const MONEY_NOUN = '(pix|dinheiro|reais|real|r\\$ ?\\d|\\d+(?:[.,]\\d+)? ?(?:mil|reais|k)\\b|\\d{2,}|transferencia|deposito|boleto|valor|grana|money|cash|usd|\\$\\d|gift ?cards?|carteira)';
 const MONEY_VERB = '(faz|faca|fazer|manda|mande|mandar|me manda|envia|envie|enviar|transfere|transfira|transferir|deposite|deposita|depositar|pague|paga|pagar|empresta|emprestar|me empresta|consegue|pode|poderia|preciso de|send|transfer|pay|wire|lend)';
@@ -92,19 +100,19 @@ const CUES = {
   ],
   shareSecret: [
     new RegExp(`\\b${SHARE_VERB}\\b.{0,50}\\b${SECRET}\\b`),
-    new RegExp(`\\b${SECRET}\\b.{0,60}\\b(pode me passar|me passa|me passe|passa pra mim|me manda|manda pra mim|me envia|me envie|send it|forward it)\\b`),
+    new RegExp(`\\b${SECRET}\\b.{0,60}\\b(pode me passar|me passa|me passe|passa pra mim|me manda|manda pra mim|me envia|me envie|me encaminh\\w+|pode encaminhar|send it|forward it)\\b`),
     /\b(chegou|chegar|recebido|enviado|que te mandamos)\b.{0,30}\b(me passa|me passe|pode me passar)\b/,
-    /\bcom a senha\b/
+    /\b(passa|manda|envia|informe|digite|digita)\b.{0,25}\bcom a senha\b/
   ],
   dataRequest: [
     /\b(informe|informando|informar|confirme|confirmar|preencha|digite|atualize|recadastre|cadastre-se|cadastre se|regularize|valide|enter|confirm|update|verify)\b.{0,40}\b(dados|cpf|cartao|dados bancarios|chave pix|agencia|conta e senha|login|details|card|account)\b/,
-    /\b(verify|confirm) (your )?account\b/, /\bverifi(que|car) (sua )?conta\b/,
+    /\b(verify|confirm) (your )?account\b/, /\bconfirm(e|ar) (a |sua |seu |o )?(conta|identidade|cadastro|numero)\b/, /\bverifi(que|car) (sua )?conta\b/,
     /\b(reset|update|verify|confirm|enter) (your )?password\b/, /\bpassword (needs|must)\b/,
     /\busando seu login\b/, /\bdados do cartao\b/
   ],
   urgency: [
     /\burgente\b/, /\burgencia\b/, /\bimediatamente\b/, /\bimediato\b/,
-    /\b(ate|so|apenas|ainda) (hoje|hj)\b/, /\b(expira|expiram|expirar|vence|vencem)\b/, /\bvao expirar\b/,
+    /\b(ate|so|apenas|ainda) (hoje|hj)\b/, /\b(expira|expiram|expirar)\b/, /\bvao expirar\b/,
     /\bultim[oa]s? (aviso|dia|chance|vagas|oportunidade)\b/, /\bprazo final\b/,
     /\bem (24|48|72|\d{1,2}) ?(h|horas|minutos|min)\b/, /\bantes que (seja tarde|expire)\b/,
     /\bvagas limitadas\b/, /\brapidinho\b/, /\bsem falta\b/, /\b(pra|para) nao perder\b/, /\bnao perca\b/,
@@ -156,7 +164,7 @@ const CUES = {
     /\b(paid|earn)\b.{0,20}\bper (like|review|task|day)\b/
   ],
   jobContext: [
-    /\b(vaga|emprego|trampo|trabalho|salario|recrutador[a]?|selecionad[oa]|tarefa|tarefas|cadastro|home office|comissao)\b/
+    /\b(vaga|emprego|trampo|trabalho|salario|recrutador[a]?|selecionad[oa]|tarefa|tarefas|cadastro|home office|comissao|selecao|candidat[oa]s?|aprovad[oa]|concurso|processo seletivo|matricula|inscricao|admissao|contratad[oa]|contratamos|certificado|uniforme|prova|exame)\b/
   ],
   investBait: [
     /\b(lucro|retorno|rendimento|ganhos?) (garantid[oa]|certo)\b/, /\bgarantia de lucro\b/, /\bsem risco\b/,
@@ -192,10 +200,66 @@ const CUES = {
     /\barquivar o processo\b/, /\bfica tudo entre nos\b/, /\bnao chame (a )?policia\b/,
     /\b(recorded you|intimate (photos|video)|kidnapped)\b/
   ],
-  pixRedirect: [
+  // Asking to send money back after a "mistaken" PIX. Between friends this is routine, so it only
+  // counts together with another manipulation signal (see the pix_pretext family).
+  pixMistake: [
     /\bpix\b.{0,40}\b(caiu errado|sem querer|por engano)\b/, /\b(sem querer|por engano)\b.{0,40}\bpix\b/,
-    /\b(mudou|mudamos|nova|outra|essa nova|essa outra) (de )?chave( pix)?\b/, /\bchave aqui\b/,
     /\b(mandar|manda) de novo\b/, /\b(consegue|pode|poderia) devolver\b/, /\bdevolva\b/
+  ],
+  // Payment target swap: a "new" PIX key, QR code or account replaces the one the reader knows.
+  pixNewKey: [
+    /\b(mudou|mudamos|mudei|nova|novo|outra|essa nova|essa outra|atualizei|atualizamos|troquei|trocamos|alterei) (a |minha |nossa |de |o )?(chave|qr ?code|conta|banco)\b/,
+    /\b(qr ?code|chave|conta) (novo|nova|aleatoria)\b/, /\b(novo|outro) qr ?code\b/, /\bchave aqui\b/,
+    /\bnao use mais\b.{0,25}\b(chave|conta|qr)/, /\ba (chave|conta|qr ?code) (antig[oa]|anterior)\b/,
+    /\bchave\b.{0,25}\b(mudou|mudamos|trocou|mudaram)\b/, /\ba (anterior|antiga) (caiu|deu|foi|esta)\b/,
+    /\ba antig[oa] (deu problema|foi bloquead|esta em analise|caiu)/
+  ],
+  secrecy: [
+    /\bnao (conta|fala|comenta|avisa|diga) (pra|para|a|com) (ninguem|mae|pai|familia|os outros)\b/,
+    /\bso (voce|vc)\b/, /\bso entre nos\b/, /\bsegredo\b/, /\bninguem pode saber\b/, /\bnao pode contar\b/
+  ],
+  cantTalk: [
+    /\bnao (consigo|posso) (ligar|falar|atender)\b/, /\bsem acesso ao (banco|app|cartao)\b/,
+    /\b(meu )?(cartao|app|conta) (travou|bloqueou|bloqueado)\b/, /\bquebrei o (celular|telefone)\b/,
+    /\busando o (celular|telefone|numero) d[oae]\b/, /\b(zap|whats|whatsapp|conta) (foi )?hackead[oa]\b/,
+    /\b(estou|to|esta) no hospital\b/, /\bdepois te explico\b/, /\bemergencia\b/
+  ],
+  repayPromise: [
+    /\b(devolvo|te devolvo|te pago|pago (amanha|hoje|depois)|devolvo amanha)\b/
+  ],
+  mediaBait: [
+    /\b(e|eh) (voce|vc)\b.{0,25}\b(foto|video|nessa|nesse)\b/,
+    /\b(voce|vc) (esta|ta|aparece|aparecendo) .{0,15}(nessa|nesse|nesta|neste)\b/,
+    /\b(achei|vi|olha|olhe|veja|confira)\b.{0,15}\b(sua|seu) (foto|video)\b/,
+    /\b(foto|fotos|video|videos|album)\b.{0,12}\b(sua|suas|seu|seus|de voce|de vc)\b/,
+    /\bquem (tirou|postou|viu|visitou)\b.{0,25}\b(foto|perfil)\b/, /\b(video|foto|fotos) (vazad[oa]s?|que gravaram)\b/,
+    /\bvazaram (um|uma|o|a) (video|foto)\b/
+  ],
+  rentalContext: [
+    /\b(alugo|alugar|aluguel|apartamento|kitnet|quarto|sobrado|imovel|temporada|casa disponivel|proprietari[oa])\b/
+  ],
+  upfrontDeposit: [
+    /\b(pague|paga|pagar|deposite|depositar|deposita|transfira|transferir|mande|manda|faca|faz)\b.{0,50}\b(caucao|sinal|taxa de (reserva|visita)|adiantad\w+|antecipad\w+)\b/,
+    /\b(reserva|segurar|reservar)\b.{0,40}\b(pix|deposit\w+|caucao|sinal|transfer\w+)\b/,
+    /\b(caucao|sinal|reserva)\b.{0,40}\b(pix|deposit\w+|transfer\w+)\b/,
+    /\bdeposito antecipado\b/
+  ],
+  charityAsk: [
+    /\b(doe|doar|doacao|doacoes|contribua|contribuir|ajude|ajudar)\b/
+  ],
+  charityAppeal: [
+    /\b(crianca|cirurgia|internad[oa]|tratamento|desabrigad\w+|vitimas|enchente|incendio|animais|abrigo|ong|fome|salva uma vida|cada real|qualquer valor|arrecad\w+|meta|campanha|agasalho|carentes?)\b/
+  ],
+  // Awareness: the message talks about scams. "alerta" and "cuidado" are weak and only count
+  // together with another awareness marker.
+  awareness: [
+    /\b(golpe|golpes|golpista|golpistas|fraude|fraudes|fraudadores?|estelionat\w+|phishing|scam|scammers?)\b/,
+    /\bnao (caiam|caia|cliquem|abram|passem|compartilhem)\b/, /\b(repassem|repasse|repassa)\b/, /\bcirculando\b/,
+    /\bfiquem (espertos|atentos|de olho)\b/, /\bquase (caiu|cai|caimos)\b/, /\b(ignorem|ignore)\b/,
+    /\bif you (receive|get) this\b/, /\bdo not (fall|click)\b/
+  ],
+  awarenessWeak: [
+    /\b(cuidado|alerta|atencao|aviso)\b/
   ],
   advanceSale: [
     /\b(pix|pagamento) antecipado\b/, /\bsinal de \d+/, /\bpague antecipado\b/, /\bseguro a data\b/
@@ -204,6 +268,7 @@ const CUES = {
     /\b(versao|whatsapp|whats) gold\b/, /\bquem (visitou|viu) seu perfil\b/, /\bselo verde\b/,
     /\bcompartilhe .{0,30}\bcom \d+ contatos\b/, /\bbaixe .{0,30}\b(apk|versao)\b/, /\bpassara a ser pago\b/
   ],
+  dueDate: [/\b(vence|vencem|vencimento)\b/],
   pixMention: [/\bpix\b/],
   moneyAmount: [/(r\$ ?\d|\b\d+(?:[.,]\d+)? ?(mil|reais|k)\b)/],
   warning: [
@@ -275,7 +340,7 @@ const NEGATION_AWARE_CUES = new Set(['shareSecret', 'dataRequest', 'moneyAsk', '
  * span of a negated match of the same cue is negated too, so "nao solicita instalacao de
  * aplicativos de acesso remoto" silences both the long and the short remote-access pattern.
  */
-function findCue(normalized, patterns, negationAware) {
+function collectAffirmed(normalized, patterns, negationAware) {
   const occurrences = [];
   for (const pattern of patterns) {
     const regex = new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`);
@@ -291,8 +356,12 @@ function findCue(normalized, patterns, negationAware) {
     }
   }
   const negatedSpans = occurrences.filter(occurrence => occurrence.negated);
-  const affirmed = occurrences.find(occurrence => !occurrence.negated &&
+  return occurrences.filter(occurrence => !occurrence.negated &&
     !negatedSpans.some(span => occurrence.start >= span.start && occurrence.end <= span.end));
+}
+
+function findCue(normalized, patterns, negationAware) {
+  const affirmed = collectAffirmed(normalized, patterns, negationAware)[0];
   return affirmed ? affirmed.text : null;
 }
 
@@ -397,8 +466,35 @@ const FAMILIES = [
   {
     id: 'pix_pretext', signal: 'payment_request', category: 'payment', severity: 'WARNING',
     rules: [
-      { when: c => c.pixRedirect && (c.moneyAsk || c.paymentDemand || c.pixMention), points: 65, why: c => `PIX refund or new key pretext ("${c.pixRedirect}")` },
-      { when: c => c.advanceSale && (c.urgency || c.paymentDemand), points: 55, why: c => `advance payment demand ("${c.advanceSale}")` }
+      { when: c => c.pixNewKey && (c.moneyAsk || c.paymentDemand || c.pixMention), points: 65, why: c => `PIX key, QR code or account swap ("${c.pixNewKey}")` },
+      { when: c => c.pixMistake && c.pixMention && (c.urgency || c.link || c.secrecy), points: 65, why: c => `PIX refund pretext ("${c.pixMistake}") plus pressure, link or secrecy` },
+      { when: c => c.advanceSale && (c.urgency || c.paymentDemand), points: 55, why: c => `advance payment demand ("${c.advanceSale}")` },
+      { when: c => c.pixMistake && (c.moneyAsk || c.paymentDemand || c.pixMention), points: 35, why: c => `PIX mistake and refund request ("${c.pixMistake}") without other pressure` }
+    ]
+  },
+  {
+    id: 'friend_money', signal: 'payment_request', category: 'payment', severity: 'WARNING',
+    rules: [
+      { when: c => c.moneyAsk && (c.cantTalk || c.secrecy), points: 60, why: c => `money request ("${c.moneyAsk}") with a reason not to talk or a secrecy request ("${c.cantTalk || c.secrecy}")` },
+      { when: c => c.moneyAsk && c.urgency && c.repayPromise, points: 55, why: c => `urgent loan request ("${c.moneyAsk}") with a repayment promise` }
+    ]
+  },
+  {
+    id: 'media_bait', signal: 'link_action', category: 'linkAction', severity: 'WARNING',
+    rules: [
+      { when: c => c.mediaBait && c.link, points: 60, why: c => `curiosity bait about the reader's photo or video ("${c.mediaBait}") plus link` }
+    ]
+  },
+  {
+    id: 'rental_deposit', signal: 'payment_request', category: 'payment', severity: 'WARNING',
+    rules: [
+      { when: c => c.rentalContext && c.upfrontDeposit, points: 60, why: c => `rental offer with upfront deposit or reservation fee ("${c.upfrontDeposit}")` }
+    ]
+  },
+  {
+    id: 'fake_charity', signal: 'financial_reward', category: 'reward', severity: 'WARNING',
+    rules: [
+      { when: c => c.charityAsk && c.charityAppeal && (c.pixMention || c.link || c.paymentDemand || c.moneyAsk), points: 60, why: c => `donation appeal ("${c.charityAsk}", "${c.charityAppeal}") with a payment target` }
     ]
   },
   {
@@ -412,13 +508,65 @@ const FAMILIES = [
 
 const LINK_POINTS_CAP = 20;
 
+// Phrases that state that nothing has to be paid. They are removed before cue detection so that
+// "frete gratis" or "nada a pagar" is not read as a fee or a prize.
+const NO_COST_PHRASES = /\b(nada a pagar|sem (nenhum )?(custo|taxa|cobranca)( adicional)?s?|nenhuma (taxa|cobranca)|(frete|entrega|envio) gratis|nao (ha|existe) (taxa|cobranca))\b/g;
+
+// Requests that make a message directed at the reader. Quoted or described occurrences are ignored.
+const REQUEST_CUES = ['shareSecret', 'dataRequest', 'moneyAsk', 'feeDemand', 'remoteAccess', 'link'];
+// Reporting words that introduce wording attributed to someone else ("pedem", "dizendo", "recebi").
+const REPORTING_MARKERS = /\b(dizendo|diz|dizem|disse|falando|falam|fala que|pedem|pedindo|pediram|pede|mandam|mandou|mandaram|ligam|ligaram|ligou|alegando|avisando|recebi|recebeu|receber|recebem|eles|golpistas?|criminosos|bandidos|usam|usando|fingindo|se passando|se (alguem|voce|vc|te)|caso (receba|alguem)|quando (alguem|te)|mensagem|print)\b/;
+
+/**
+ * Turn typographic and apostrophe-style quotation marks into plain double quotes so that quoted
+ * wording can be located after normalization (which otherwise drops apostrophes).
+ */
+function markQuotes(rawText) {
+  return String(rawText || '')
+    .replace(/[\u201C\u201D\u00AB\u00BB]/g, '"')
+    .replace(/(^|[\s:(\[])['\u2018\u2019`](?=\S)/g, '$1"')
+    .replace(/(\S)['\u2018\u2019`](?=$|[\s.,;:!?)\]])/g, '$1"');
+}
+
+/**
+ * True when the occurrence at [start, end) is quoted or described instead of addressed to the
+ * reader: it sits inside quotation marks, or its sentence begins with a reporting word.
+ */
+function isReportedAt(normalized, start) {
+  const before = normalized.slice(0, start);
+  if ((before.match(/"/g) || []).length % 2 === 1) return true;
+  const sentenceStart = Math.max(
+    before.lastIndexOf('.'), before.lastIndexOf('!'), before.lastIndexOf('?'), before.lastIndexOf(';'), before.lastIndexOf(':')
+  ) + 1;
+  return REPORTING_MARKERS.test(before.slice(sentenceStart));
+}
+
+/**
+ * Awareness context: the text warns about scams (one strong marker, or two weak ones) and no
+ * request cue is addressed to the reader.
+ */
+function isAwarenessContext(cues, normalized) {
+  const strong = Boolean(cues.awareness);
+  const weakMarkers = (normalized.match(/\b(cuidado|alerta|atencao|aviso)\b/g) || []).length;
+  if (!strong && !(cues.awarenessWeak && weakMarkers >= 2)) return false;
+  for (const name of REQUEST_CUES) {
+    const occurrences = collectAffirmed(normalized, CUES[name], NEGATION_AWARE_CUES.has(name));
+    // The bare word "link" is a description ("recebi um link falso"), not a request.
+    const asked = occurrences.filter(occurrence => !(name === 'link' && occurrence.text === 'link'));
+    if (asked.some(occurrence => !isReportedAt(normalized, occurrence.start))) return false;
+  }
+  return true;
+}
+const AWARENESS_FACTOR = 0.3;
+
 /**
  * Score a message. Returns the quickDetect-compatible fields plus evidence.
  */
 export function scoreMessage(rawText) {
-  const normalized = normalizeText(rawText);
+  const normalized = normalizeText(markQuotes(rawText));
   // URLs become a neutral token so host names ("example", "premio") do not trigger word cues.
-  const cues = detectCues(normalized.replace(/\b(?:https?:\/\/|www\.)\S+/g, ' link '));
+  const cueText = normalized.replace(/\b(?:https?:\/\/|www\.)\S+/g, ' link ').replace(NO_COST_PHRASES, ' ');
+  const cues = detectCues(cueText);
   const linkInfo = analyzeLinks(rawText);
   const familyHits = [];
 
@@ -468,6 +616,9 @@ export function scoreMessage(rawText) {
     if (cues.officialChannel) score -= 10;
   }
 
+  const awareness = score > 0 && isAwarenessContext(cues, cueText);
+  if (awareness) score *= AWARENESS_FACTOR;
+
   score = Math.round(Math.max(0, Math.min(100, score)));
 
   return {
@@ -478,9 +629,11 @@ export function scoreMessage(rawText) {
     linkFindings: linkInfo.findings,
     weakSignals: weak.map(([name]) => name),
     context: { educational, negated },
+    awareness,
     evidence: [
       ...familyHits.map(hit => hit.evidence),
-      ...linkInfo.findings.map(finding => `suspicious_link: ${finding}`)
+      ...linkInfo.findings.map(finding => `suspicious_link: ${finding}`),
+      ...(awareness ? ['awareness_context: the message warns about scams and only quotes or describes the scam wording'] : [])
     ],
     matches: [
       ...familyHits.map(hit => ({ pattern: hit.evidence, severity: hit.family.severity, category: hit.family.category, family: hit.family.id })),
