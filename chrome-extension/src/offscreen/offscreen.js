@@ -3,6 +3,8 @@
  * Runs Chrome Built-in AI (LanguageModel / Summarizer) in an offscreen document context.
  */
 
+import { AVAILABILITY, normalizeAvailability, isAvailabilityReady } from '../utils/ai-availability.js';
+
 const REQ_TYPE = 'SPAI_OFFSCREEN_AI_REQUEST';
 const SUPPORTED_OUTPUT_LANGUAGES = new Set(['de', 'en', 'es', 'fr', 'ja']);
 const PROMPT_TIMEOUT_MS = 90000;
@@ -76,29 +78,12 @@ function normalizeLanguageModelParams(params = {}) {
   };
 }
 
-function isAvailableStatus(availability) {
-  return (
-    availability === 'readily' ||
-    availability === 'available' ||
-    availability === 'after-download' ||
-    availability === 'downloadable' ||
-    availability === 'downloading'
-  );
-}
-
 async function getLanguageModelAvailability(options = {}) {
-  if (typeof self === 'undefined' || !self.LanguageModel) {
-    return 'no';
+  if (typeof self === 'undefined' || !self.LanguageModel || typeof self.LanguageModel.availability !== 'function') {
+    return AVAILABILITY.UNAVAILABLE;
   }
   const normalized = normalizeSessionOptions(options);
-  if (typeof self.LanguageModel.availability === 'function') {
-    return await self.LanguageModel.availability(normalized);
-  }
-  if (typeof self.LanguageModel.capabilities === 'function') {
-    const capabilities = await self.LanguageModel.capabilities(normalized);
-    return capabilities?.available || capabilities?.availability || 'no';
-  }
-  return typeof self.LanguageModel.create === 'function' ? 'readily' : 'no';
+  return normalizeAvailability(await self.LanguageModel.availability(normalized));
 }
 
 async function getLanguageModelParams(options = {}) {
@@ -120,22 +105,20 @@ async function getLanguageModelCapabilities(options = {}) {
   const availability = await getLanguageModelAvailability(normalized);
   const params = await getLanguageModelParams(normalized);
   return {
-    available: isAvailableStatus(availability),
+    available: isAvailabilityReady(availability),
     availability,
     ...params
   };
 }
 
 async function getSummarizerAvailability(options = {}) {
-  if (typeof self === 'undefined' || !self.Summarizer) {
-    return 'no';
+  if (typeof self === 'undefined' || !self.Summarizer || typeof self.Summarizer.availability !== 'function') {
+    return AVAILABILITY.UNAVAILABLE;
   }
   const normalized = normalizeSummarizerOptions(options);
-  if (typeof self.Summarizer.availability === 'function') {
-    return await self.Summarizer.availability(normalized);
-  }
-  return typeof self.Summarizer.create === 'function' ? 'readily' : 'no';
+  return normalizeAvailability(await self.Summarizer.availability(normalized));
 }
+
 async function ensureSession(sessionId, options = {}) {
   if (sessionId && sessions.has(sessionId)) {
     const existing = sessions.get(sessionId);
@@ -224,7 +207,7 @@ async function summarizeText(text, options = {}) {
   });
 
   const availability = await getSummarizerAvailability(summarizerOptions);
-  if (!isAvailableStatus(availability)) {
+  if (!isAvailabilityReady(availability)) {
     throw new Error(`AI_UNAVAILABLE: Chrome Built-in AI Summarizer is not available (${availability})`);
   }
 
@@ -268,13 +251,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
       case 'summarizerAvailable': {
         const availability = await getSummarizerAvailability();
-        return { ok: true, result: { available: isAvailableStatus(availability), availability } };
+        return { ok: true, result: { available: isAvailabilityReady(availability), availability } };
       }
 
       case 'diagnostics': {
         const languageModelPresent = typeof self !== 'undefined' && !!self.LanguageModel;
         const summarizerPresent = typeof self !== 'undefined' && !!self.Summarizer;
-        let summarizerAvailability = 'no';
+        let summarizerAvailability = AVAILABILITY.UNAVAILABLE;
         let caps = null;
         let capsError = null;
         try {

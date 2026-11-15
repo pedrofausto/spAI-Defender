@@ -291,7 +291,7 @@ async function handleCheckAvailability(sendResponse) {
     const availability = await aiManager.checkAvailability();
     const capabilities = await aiManager.getCapabilities().catch((e) => ({
       available: false,
-      availability: 'no',
+      availability: 'unavailable',
       defaultTemperature: 0.8,
       defaultTopK: 40,
       maxTopK: 40,
@@ -314,7 +314,7 @@ async function handleCheckAvailability(sendResponse) {
     console.error('Error checking AI availability:', error);
     sendResponse({
       success: false,
-      availability: 'no',
+      availability: 'unavailable',
       error: error?.message || String(error),
       hasSummarizationAPI: false
     });

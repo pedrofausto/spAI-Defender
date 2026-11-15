@@ -2,12 +2,12 @@ import { AIOffscreenProxy } from '../../../chrome-extension/src/utils/ai-offscre
 
 function makeProxy() {
   const proxy = new AIOffscreenProxy();
-  proxy.availability = 'readily';
+  proxy.availability = 'available';
   proxy.availabilityChecked = true;
   proxy.aiAvailable = true;
   proxy._send = jest.fn(async (action, payload) => {
     if (action === 'capabilities') {
-      return { available: true, availability: 'readily' };
+      return { available: true, availability: 'available' };
     }
     if (action === 'createSession') {
       return { sessionId: `session-${proxy._send.mock.calls.filter(([a]) => a === 'createSession').length}` };
@@ -56,7 +56,7 @@ describe('AIOffscreenProxy session isolation', () => {
     const proxy = makeProxy();
     let resolvePrompt;
     proxy._send = jest.fn((action, payload) => {
-      if (action === 'capabilities') return Promise.resolve({ available: true, availability: 'readily' });
+      if (action === 'capabilities') return Promise.resolve({ available: true, availability: 'available' });
       if (action === 'createSession') return Promise.resolve({ sessionId: 'session-1' });
       if (action === 'prompt') return new Promise((resolve) => { resolvePrompt = () => resolve({ sessionId: payload.sessionId, text: 'done' }); });
       if (action === 'destroySession') return Promise.resolve(true);
@@ -99,21 +99,21 @@ describe('AIOffscreenProxy Built-in AI availability contract', () => {
     const proxy = new AIOffscreenProxy();
     proxy._send = jest.fn().mockResolvedValue({
       available: true,
-      availability: 'after-download',
+      availability: 'downloadable',
       defaultTemperature: 0.7,
       defaultTopK: 32,
       maxTopK: 64
     });
 
-    await expect(proxy.checkAvailability()).resolves.toBe('after-download');
-    expect(proxy.aiAvailable).toBe(true);
+    await expect(proxy.checkAvailability()).resolves.toBe('downloadable');
+    expect(proxy.aiAvailable).toBe(false);
   });
 
   test('getCapabilities preserves boolean availability and model params', async () => {
     const proxy = new AIOffscreenProxy();
     proxy._send = jest.fn().mockResolvedValue({
       available: true,
-      availability: 'readily',
+      availability: 'available',
       defaultTemperature: 0.6,
       defaultTopK: 24,
       maxTopK: 48
@@ -121,58 +121,92 @@ describe('AIOffscreenProxy Built-in AI availability contract', () => {
 
     await expect(proxy.getCapabilities()).resolves.toEqual({
       available: true,
-      availability: 'readily',
+      availability: 'available',
       defaultTemperature: 0.6,
       defaultTopK: 24,
       maxTopK: 48
     });
   });
 
-  test('hasSummarizationAPI accepts normalized summarizer availability', async () => {
+  test('hasSummarizationAPI is true only when the summarizer is available', async () => {
     const proxy = new AIOffscreenProxy();
-    proxy._send = jest.fn().mockResolvedValue({ available: false, availability: 'after-download' });
+    proxy._send = jest.fn().mockResolvedValue({ available: false, availability: 'downloadable' });
 
-    await expect(proxy.hasSummarizationAPI()).resolves.toBe(true);
+    await expect(proxy.hasSummarizationAPI()).resolves.toBe(false);
   });
 
-  test('checkAvailability still supports legacy capabilities available string', async () => {
+  test('checkAvailability maps legacy availability strings to unavailable', async () => {
     const proxy = new AIOffscreenProxy();
-    proxy._send = jest.fn().mockResolvedValue({ available: 'readily' });
+    proxy._send = jest.fn().mockResolvedValue({ availability: 'readily' });
 
-    await expect(proxy.checkAvailability()).resolves.toBe('readily');
-    expect(proxy.aiAvailable).toBe(true);
+    await expect(proxy.checkAvailability()).resolves.toBe('unavailable');
+    expect(proxy.aiAvailable).toBe(false);
   });
 
   test('does not cache transient downloading availability', async () => {
     const proxy = new AIOffscreenProxy();
     proxy._send = jest.fn()
       .mockResolvedValueOnce({ available: true, availability: 'downloading' })
-      .mockResolvedValueOnce({ available: true, availability: 'readily' });
+      .mockResolvedValueOnce({ available: true, availability: 'available' });
 
     await expect(proxy.checkAvailability()).resolves.toBe('downloading');
-    expect(proxy.aiAvailable).toBe(true);
+    expect(proxy.aiAvailable).toBe(false);
     expect(proxy.availabilityChecked).toBe(false);
 
-    await expect(proxy.checkAvailability()).resolves.toBe('readily');
+    await expect(proxy.checkAvailability()).resolves.toBe('available');
     expect(proxy._send).toHaveBeenCalledTimes(2);
     expect(proxy.availabilityChecked).toBe(true);
   });
 
-  test('createSession force-refreshes availability and accepts downloadable states', async () => {
+  test.each(['downloadable', 'downloading'])('createSession refuses to run while availability is %s', async (state) => {
     const proxy = new AIOffscreenProxy();
-    proxy.availability = 'no';
-    proxy.availabilityChecked = true;
     proxy._send = jest.fn(async (action) => {
-      if (action === 'capabilities') return { available: true, availability: 'downloadable' };
-      if (action === 'createSession') return { sessionId: 'session-downloadable' };
+      if (action === 'capabilities') return { available: false, availability: state };
+      return {};
+    });
+
+    await expect(proxy.createSession()).rejects.toMatchObject({ code: 'AI_MODEL_NOT_READY', availability: state });
+    expect(proxy._send.mock.calls.map(([action]) => action)).toEqual(['capabilities']);
+  });
+
+  test('createSession rejects with AI_UNAVAILABLE when the model is unavailable', async () => {
+    const proxy = new AIOffscreenProxy();
+    proxy._send = jest.fn(async () => ({ available: false, availability: 'unavailable' }));
+
+    await expect(proxy.createSession()).rejects.toMatchObject({ code: 'AI_UNAVAILABLE' });
+  });
+
+  test('createSession does not overwrite the freshly checked availability', async () => {
+    const proxy = new AIOffscreenProxy();
+    proxy._send = jest.fn(async (action) => {
+      if (action === 'capabilities') return { available: true, availability: 'available' };
+      if (action === 'createSession') return { sessionId: 'session-ready' };
       return {};
     });
 
     const session = await proxy.createSession();
 
-    expect(session.sessionId).toBe('session-downloadable');
+    expect(session.sessionId).toBe('session-ready');
     expect(proxy._send.mock.calls.map(([action]) => action)).toEqual(['capabilities', 'createSession']);
-    expect(proxy.availability).toBe('readily');
+    expect(proxy.availability).toBe('available');
+  });
+
+  test('creates the offscreen document with a reason that matches the documented list', async () => {
+    const proxy = new AIOffscreenProxy();
+    global.chrome = {
+      runtime: { sendMessage: jest.fn().mockResolvedValue({ ok: true, result: {} }) },
+      offscreen: { hasDocument: jest.fn().mockResolvedValue(false), createDocument: jest.fn().mockResolvedValue(undefined) }
+    };
+    await proxy._ensureOffscreenDocument();
+    const args = global.chrome.offscreen.createDocument.mock.calls[0][0];
+    // Documented list: https://developer.chrome.com/docs/extensions/reference/api/offscreen (Reason enum).
+    const documented = ['TESTING','AUDIO_PLAYBACK','IFRAME_SCRIPTING','DOM_SCRAPING','BLOBS','DOM_PARSER','USER_MEDIA',
+      'DISPLAY_MEDIA','WEB_RTC','CLIPBOARD','LOCAL_STORAGE','WORKERS','BATTERY_STATUS','MATCH_MEDIA','GEOLOCATION'];
+    expect(args.reasons.length).toBeGreaterThan(0);
+    args.reasons.forEach((reason) => expect(documented).toContain(reason));
+    // No listed reason names local model inference, so the justification must say what the document really does.
+    expect(args.justification).toMatch(/Prompt API|LanguageModel/);
+    expect(args.justification).toMatch(/no listed reason|none of the listed reasons/i);
   });
 });
 

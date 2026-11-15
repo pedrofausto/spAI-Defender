@@ -3,6 +3,8 @@
  * Runs Built-in AI calls in an offscreen document and exposes an AISessionManager-like API to the service worker.
  */
 
+import { AVAILABILITY, normalizeAvailability, isAvailabilityReady } from './ai-availability.js';
+
 const OFFSCREEN_URL = 'src/offscreen/offscreen.html';
 const REQ_TYPE = 'SPAI_OFFSCREEN_AI_REQUEST';
 const SUPPORTED_OUTPUT_LANGUAGES = new Set(['de', 'en', 'es', 'fr', 'ja']);
@@ -49,24 +51,14 @@ function normalizeSessionOptions(inputOptions = {}) {
   return normalizeLanguageModelExpectations(options);
 }
 
-function isReadyAvailability(availability) {
-  return availability === 'readily' || availability === 'available';
-}
-
-function isTransientAvailability(availability) {
-  return availability === 'after-download' || availability === 'downloadable' || availability === 'downloading';
-}
-
 function isUnavailableStatus(availability) {
-  return availability === 'no' || availability === 'unavailable';
+  return availability === AVAILABILITY.UNAVAILABLE;
 }
 
-function canAttemptLanguageModelSession(availability) {
-  return isReadyAvailability(availability) || isTransientAvailability(availability);
-}
-
+// Only 'available' is cached. 'downloadable' and 'downloading' change outside the extension process
+// (the user starts or finishes a download), so they are rechecked every time.
 function shouldCacheAvailability(availability) {
-  return isReadyAvailability(availability) || isUnavailableStatus(availability);
+  return isAvailabilityReady(availability) || isUnavailableStatus(availability);
 }
 
 export class AIOffscreenProxy {
@@ -125,7 +117,9 @@ export class AIOffscreenProxy {
         await chrome.offscreen.createDocument({
           url: OFFSCREEN_URL,
           reasons: ['DOM_SCRAPING'],
-          justification: 'Run Chrome Built-in AI (LanguageModel/Summarizer) in an offscreen document context.'
+          justification:
+            'Runs the Chrome Prompt API (LanguageModel) and Summarizer API in a document context for on-device analysis. ' +
+            'None of the listed reasons names local model inference; DOM_SCRAPING is the closest available value and no DOM is scraped.'
         });
         const ready = await this._waitForOffscreenReady();
         if (!ready) {
@@ -189,18 +183,18 @@ export class AIOffscreenProxy {
       const env = this._envInfo();
       console.log('[spai][ai-proxy] checkAvailability()', env);
       const caps = await this._send('capabilities', {}, 4000);
-      const availability = caps?.availability || (typeof caps?.available === 'string' ? caps.available : 'no');
+      const availability = normalizeAvailability(caps?.availability);
       this.availability = availability;
-      this.aiAvailable = canAttemptLanguageModelSession(availability);
+      this.aiAvailable = isAvailabilityReady(availability);
       this.availabilityChecked = shouldCacheAvailability(availability);
       console.log('[spai][ai-proxy] availability:', this.availability);
       return this.availability;
     } catch (e) {
       console.warn('[spai][ai-proxy] availability check failed:', e?.message || e);
-      this.availability = 'no';
+      this.availability = AVAILABILITY.UNAVAILABLE;
       this.aiAvailable = false;
       this.availabilityChecked = true;
-      return 'no';
+      return AVAILABILITY.UNAVAILABLE;
     }
   }
 
@@ -213,7 +207,7 @@ export class AIOffscreenProxy {
     if (isUnavailableStatus(availability)) {
       return {
         available: false,
-        availability: 'no',
+        availability: AVAILABILITY.UNAVAILABLE,
         defaultTemperature: 0.8,
         defaultTopK: 40,
         maxTopK: 40,
@@ -222,9 +216,10 @@ export class AIOffscreenProxy {
     }
 
     const caps = await this._send('capabilities', {}, 4000);
+    const reported = normalizeAvailability(caps?.availability ?? availability);
     return {
-      available: true,
-      availability: caps?.availability || (typeof caps?.available === 'string' ? caps.available : availability),
+      available: isAvailabilityReady(reported),
+      availability: reported,
       defaultTemperature: caps?.defaultTemperature || 0.8,
       defaultTopK: caps?.defaultTopK || 40,
       maxTopK: caps?.maxTopK || 40
@@ -234,7 +229,7 @@ export class AIOffscreenProxy {
   async hasSummarizationAPI() {
     try {
       const res = await this._send('summarizerAvailable', {}, 4000);
-      return res?.available === true || canAttemptLanguageModelSession(res?.availability);
+      return isAvailabilityReady(normalizeAvailability(res?.availability));
     } catch (e) {
       console.warn('[spai][ai-proxy] summarizerAvailable check failed:', e?.message || e);
       return false;
@@ -255,12 +250,17 @@ export class AIOffscreenProxy {
       error.code = 'AI_UNAVAILABLE';
       throw error;
     }
+    if (!isAvailabilityReady(availability)) {
+      // 'downloadable' or 'downloading': the model must finish downloading first. The download needs a user click
+      // (see docs/chrome-ai-verified.md), so analyses must not start a session here.
+      const error = new Error(`AI_MODEL_NOT_READY: Chrome Built-in AI model is ${availability}`);
+      error.code = 'AI_MODEL_NOT_READY';
+      error.availability = availability;
+      throw error;
+    }
 
     const normalized = normalizeSessionOptions(options);
     const { sessionId } = await this._send('createSession', { options: normalized }, 8000);
-    this.availability = 'readily';
-    this.aiAvailable = true;
-    this.availabilityChecked = true;
     this._sessionOptions.set(sessionId, normalized);
     return this._createSessionProxy(sessionId, normalized);
   }

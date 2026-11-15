@@ -31,7 +31,7 @@ describe('offscreen AI runtime', () => {
     };
 
     global.window.LanguageModel = {
-      availability: jest.fn().mockResolvedValue('readily'),
+      availability: jest.fn().mockResolvedValue('available'),
       params: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockResolvedValue(mockSession)
     };
@@ -68,7 +68,7 @@ describe('offscreen AI runtime', () => {
       ok: true,
       result: {
         available: true,
-        availability: 'readily',
+        availability: 'available',
         defaultTemperature: 0.8,
         defaultTopK: 40,
         maxTopK: 40
@@ -127,7 +127,7 @@ describe('offscreen AI runtime', () => {
       destroy: jest.fn().mockResolvedValue(undefined)
     };
     global.window.Summarizer = {
-      availability: jest.fn().mockResolvedValue('readily'),
+      availability: jest.fn().mockResolvedValue('available'),
       create: jest.fn().mockResolvedValue(summarizer)
     };
 
@@ -278,6 +278,37 @@ describe('offscreen AI runtime', () => {
     }
   });
 
+
+  test.each(['downloadable', 'downloading'])('capabilities reports available=false while the model is %s', async (state) => {
+    global.window.LanguageModel.availability.mockResolvedValue(state);
+    const response = await sendMessage({ type: 'SPAI_OFFSCREEN_AI_REQUEST', action: 'capabilities', payload: {} });
+    expect(response.result).toEqual(expect.objectContaining({ available: false, availability: state }));
+  });
+
+  test('maps legacy availability strings from Chrome to unavailable', async () => {
+    global.window.LanguageModel.availability.mockResolvedValue('readily');
+    const response = await sendMessage({ type: 'SPAI_OFFSCREEN_AI_REQUEST', action: 'capabilities', payload: {} });
+    expect(response.result).toEqual(expect.objectContaining({ available: false, availability: 'unavailable' }));
+  });
+
+  test('reports unavailable instead of guessing readiness when availability() is missing', async () => {
+    delete global.window.LanguageModel.availability;
+    const response = await sendMessage({ type: 'SPAI_OFFSCREEN_AI_REQUEST', action: 'capabilities', payload: {} });
+    expect(response.result).toEqual(expect.objectContaining({ available: false, availability: 'unavailable' }));
+  });
+
+  test('summarize refuses to run while the summarizer model still has to download', async () => {
+    global.window.Summarizer = {
+      availability: jest.fn().mockResolvedValue('downloadable'),
+      create: jest.fn()
+    };
+    const response = await sendMessage({
+      type: 'SPAI_OFFSCREEN_AI_REQUEST',
+      action: 'summarize',
+      payload: { text: 'hello', options: {} }
+    });
+    expect(response.ok).toBe(false);
+    expect(response.error).toContain('downloadable');
+    expect(global.window.Summarizer.create).not.toHaveBeenCalled();
+  });
 });
-
-
