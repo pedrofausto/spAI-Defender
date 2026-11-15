@@ -1,0 +1,10 @@
+{"id":"syn-001","text":"URGENTE: sua conta do banco foi bloqueada. Confirme sua senha e o código agora em https://banco-seguro.example.invalid/login","label":"scam","lang":"pt","source":"synthetic"}
+{"id":"syn-002","text":"Parabéns! Você ganhou um prêmio grátis. Clique no link https://premio.example.invalid e pague a taxa via pix para liberar.","label":"scam","lang":"pt","source":"synthetic"}
+{"id":"syn-003","text":"Oi mãe, troquei de número. Preciso pagar um boleto urgente hoje, pode fazer uma transferência agora?","label":"scam","lang":"pt","source":"synthetic"}
+{"id":"syn-004","text":"Bom dia! O almoço de domingo continua marcado para meio-dia na casa da vó.","label":"legit","lang":"pt","source":"synthetic"}
+{"id":"syn-005","text":"Lembrete: a reunião do condomínio foi remarcada para quinta às 19h.","label":"legit","lang":"pt","source":"synthetic"}
+{"id":"syn-006","text":"Security team alert: suspicious activity on your bank account. Verify your account password immediately at https://verify.example.invalid","label":"scam","lang":"en","source":"synthetic"}
+{"id":"syn-007","text":"You won a free gift card! Click here to claim your prize now: https://gift.example.invalid and pay the small payment in bitcoin.","label":"scam","lang":"en","source":"synthetic"}
+{"id":"syn-008","text":"Hey, are we still meeting for coffee tomorrow at 10?","label":"legit","lang":"en","source":"synthetic"}
+{"id":"syn-009","text":"Thanks for the photos from the trip, they look great.","label":"legit","lang":"en","source":"synthetic"}
+{"id":"syn-010","text":"Your verification code for the gym app is 482913. Do not share it with anyone.","label":"legit","lang":"en","source":"synthetic"}

@@ -1,0 +1,7 @@
+mensagem;classe;origem
+"Oi mae, numero novo. Faz um pix pra mim?";fraude;sintetico
+"Bom dia, a reuniao foi pro bloco C";normal;sintetico
+"Texto com ""aspas"" e
+quebra de linha";FRAUDE;sintetico
+;normal;sintetico
+"Pagamento do aluguel feito";normal;sintetico

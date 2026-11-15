@@ -562,6 +562,29 @@ describe('HybridScorer', () => {
     });
   });
 
+  describe('deterministic heuristic floor for the phishing component', () => {
+    test('AI confidence of zero cannot erase a strong heuristic contribution', () => {
+      const result = scorer.calculateHybridScore({
+        phishingAnalysis: { riskScore: 1, confidence: 0, heuristicScore: 0.9, isPhishing: true }
+      });
+      expect(result.breakdown.phishing).toBe(90);
+    });
+
+    test('AI risk still dominates when it is higher than the heuristic contribution', () => {
+      const result = scorer.calculateHybridScore({
+        phishingAnalysis: { riskScore: 0.95, confidence: 1, heuristicScore: 0.2, isPhishing: true }
+      });
+      expect(result.breakdown.phishing).toBe(95);
+    });
+
+    test('missing heuristic score leaves the phishing component unchanged', () => {
+      const result = scorer.calculateHybridScore({
+        phishingAnalysis: { riskScore: 0.6, confidence: 0.5 }
+      });
+      expect(result.breakdown.phishing).toBe(30);
+    });
+  });
+
   describe('phishing detection override logic', () => {
     test('should override low hybrid score with strong phishing signals', () => {
       const components = {

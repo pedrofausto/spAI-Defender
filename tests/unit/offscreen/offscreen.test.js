@@ -40,9 +40,9 @@ describe('offscreen AI runtime', () => {
     await import('../../../chrome-extension/src/offscreen/offscreen.js');
   }
 
-  function sendMessage(request) {
+  function sendMessage(request, sender = {}) {
     return new Promise((resolve) => {
-      const keepAlive = listener(request, {}, resolve);
+      const keepAlive = listener(request, sender, resolve);
       expect(keepAlive).toBe(true);
     });
   }
@@ -243,6 +243,41 @@ describe('offscreen AI runtime', () => {
     await expect(secondPrompt).resolves.toEqual(expect.objectContaining({ ok: true }));
     expect(mockSession.prompt).toHaveBeenCalledTimes(2);
   });
+  test('rejects AI requests that originate from a tab context', async () => {
+    const response = await sendMessage({
+      type: 'SPAI_OFFSCREEN_AI_REQUEST',
+      action: 'createSession',
+      payload: { options: {} }
+    }, { tab: { id: 7 }, url: 'https://web.whatsapp.com/' });
+
+    expect(response).toEqual({ ok: false, error: 'Unauthorized sender' });
+    expect(global.window.LanguageModel.create).not.toHaveBeenCalled();
+  });
+
+  test('caps live native sessions at four and destroys the oldest one', async () => {
+    const createdSessions = [];
+    global.window.LanguageModel.create = jest.fn().mockImplementation(async () => {
+      const session = { prompt: jest.fn().mockResolvedValue('ok'), destroy: jest.fn().mockResolvedValue(undefined) };
+      createdSessions.push(session);
+      return session;
+    });
+
+    for (let i = 0; i < 5; i++) {
+      const response = await sendMessage({
+        type: 'SPAI_OFFSCREEN_AI_REQUEST',
+        action: 'createSession',
+        payload: { options: {} }
+      });
+      expect(response.ok).toBe(true);
+    }
+
+    expect(createdSessions).toHaveLength(5);
+    expect(createdSessions[0].destroy).toHaveBeenCalledTimes(1);
+    for (let i = 1; i < 5; i++) {
+      expect(createdSessions[i].destroy).not.toHaveBeenCalled();
+    }
+  });
+
 });
 
 

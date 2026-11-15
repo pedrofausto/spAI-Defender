@@ -9,6 +9,7 @@ const PROMPT_TIMEOUT_MS = 90000;
 const DESTROYED_SESSION_ERROR_FRAGMENT = 'session has been destroyed';
 let sessionSeq = 0;
 const sessions = new Map(); // sessionId -> { session, activePrompts, destroyRequested }
+const MAX_LIVE_SESSIONS = 4; // Oldest sessions are evicted beyond this cap to bound native memory
 let promptQueue = Promise.resolve();
 
 function enqueuePrompt(operation) {
@@ -158,7 +159,29 @@ async function ensureSession(sessionId, options = {}) {
   }
   const id = sessionId || nextSessionId();
   sessions.set(id, { session, activePrompts: 0, destroyRequested: false });
+  await enforceSessionCap(id);
   return { session, sessionId: id };
+}
+
+function countLiveSessions() {
+  let count = 0;
+  for (const entry of sessions.values()) {
+    if (!entry.destroyRequested) count += 1;
+  }
+  return count;
+}
+
+/**
+ * Destroy the oldest live sessions until the cap holds. The session that was just created
+ * (keepSessionId) is never evicted. Sessions with in-flight prompts are finalized after the prompt.
+ */
+async function enforceSessionCap(keepSessionId) {
+  while (countLiveSessions() > MAX_LIVE_SESSIONS) {
+    const victim = Array.from(sessions.entries())
+      .find(([id, entry]) => id !== keepSessionId && !entry.destroyRequested);
+    if (!victim) break;
+    await destroySession(victim[0]);
+  }
 }
 
 async function finalizeSessionDestroy(sessionId, entry) {
@@ -213,8 +236,14 @@ async function summarizeText(text, options = {}) {
   }
 }
 
-chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (!request || request.type !== REQ_TYPE) return;
+
+  // Only the extension service worker may drive the offscreen AI runtime. Tab contexts are rejected.
+  if (sender?.tab) {
+    sendResponse({ ok: false, error: 'Unauthorized sender' });
+    return false;
+  }
 
   (async () => {
     const { action, payload } = request;

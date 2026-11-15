@@ -226,3 +226,10 @@ api-key-*
 .moai/temp/
 .moai/error_logs/
 .TemporaryItems
+
+# Local evaluation data (third-party, may contain personal data; never commit)
+data/
+
+# MoAI local session state
+.moai/memory/last-session-state.json
+chrome-extension/.moai/

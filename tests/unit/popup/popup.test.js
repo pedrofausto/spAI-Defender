@@ -172,6 +172,68 @@ describe('enterprise popup', () => {
     expect(document.getElementById('chatInspectorObservations').textContent).toBe('7');
   });
 
+  test('stays silent on sites other than WhatsApp Web and Telegram Web', async () => {
+    setupChrome({
+      CHECK_AI_AVAILABILITY:{success:true,availability:'readily'},
+      GET_THREAT_STATS:{success:true,stats:{dashboard}},
+      GET_WHATSAPP_CHAT_HISTORY:{success:true,chats:[],recentChats:[],dangerousChats:[]},
+      GET_PLATFORM_INFO:{success:true,platform:'WEB'}
+    });
+    chrome.tabs.query.mockResolvedValue([{ id:3, title:'Example', url:'https://example.test/' }]);
+    await importPopup();
+
+    const sentTypes = chrome.runtime.sendMessage.mock.calls.map(([message])=>message.type);
+    expect(sentTypes).not.toContain('GET_TAB_CONTENT');
+    expect(sentTypes).not.toContain('DETECT_PHISHING');
+    expect(document.getElementById('notice').hidden).toBe(true);
+    expect(document.getElementById('notice').textContent).toBe('');
+  });
+
+  test('treats lookalike hosts and plain http as unsupported', async () => {
+    setupChrome({
+      CHECK_AI_AVAILABILITY:{success:true,availability:'readily'},
+      GET_THREAT_STATS:{success:true,stats:{dashboard}},
+      GET_WHATSAPP_CHAT_HISTORY:{success:true,chats:[],recentChats:[],dangerousChats:[]},
+      GET_PLATFORM_INFO:{success:true,platform:'WEB'}
+    });
+    chrome.tabs.query.mockResolvedValue([{ id:3, title:'Fake', url:'http://web.whatsapp.com.example.test/' }]);
+    await importPopup();
+
+    const sentTypes = chrome.runtime.sendMessage.mock.calls.map(([message])=>message.type);
+    expect(sentTypes).not.toContain('GET_TAB_CONTENT');
+  });
+
+  test('shows a localized coming-soon message on Telegram Web', async () => {
+    setupChrome({
+      CHECK_AI_AVAILABILITY:{success:true,availability:'readily'},
+      GET_THREAT_STATS:{success:true,stats:{dashboard}},
+      GET_WHATSAPP_CHAT_HISTORY:{success:true,chats:[],recentChats:[],dangerousChats:[]},
+      GET_PLATFORM_INFO:{success:true,platform:'TELEGRAM'},
+      GET_TAB_CONTENT:{success:false,error:'PLATFORM_NOT_READY'}
+    });
+    chrome.tabs.query.mockResolvedValue([{ id:4, title:'Telegram', url:'https://web.telegram.org/k/' }]);
+    await importPopup();
+
+    expect(document.getElementById('notice').textContent).toContain('Telegram Web support is coming soon');
+    expect(document.getElementById('notice').textContent).not.toContain('PLATFORM_NOT_READY');
+    expect(document.getElementById('stepExtract').dataset.state).toBe('failed');
+  });
+
+  test('shows the Telegram coming-soon message in Portuguese', async () => {
+    Object.defineProperty(global.navigator,'language',{value:'pt-BR',configurable:true});
+    setupChrome({
+      CHECK_AI_AVAILABILITY:{success:true,availability:'readily'},
+      GET_THREAT_STATS:{success:true,stats:{dashboard}},
+      GET_WHATSAPP_CHAT_HISTORY:{success:true,chats:[],recentChats:[],dangerousChats:[]},
+      GET_PLATFORM_INFO:{success:true,platform:'TELEGRAM'},
+      GET_TAB_CONTENT:{success:false,error:'PLATFORM_NOT_READY'}
+    });
+    chrome.tabs.query.mockResolvedValue([{ id:4, title:'Telegram', url:'https://web.telegram.org/a/' }]);
+    await importPopup();
+
+    expect(document.getElementById('notice').textContent).toContain('Telegram Web chegará em breve');
+  });
+
   test('keeps completed risk when sentiment and summary fail', async () => {
     setupChrome({
       CHECK_AI_AVAILABILITY:{success:true,availability:'readily'},

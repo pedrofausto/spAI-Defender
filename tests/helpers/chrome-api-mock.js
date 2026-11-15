@@ -48,6 +48,12 @@ export function setupChromeMocks() {
       remove: jest.fn().mockResolvedValue({}),
       clear: jest.fn().mockResolvedValue({})
     },
+    session: {
+      get: jest.fn().mockResolvedValue({}),
+      set: jest.fn().mockResolvedValue({}),
+      remove: jest.fn().mockResolvedValue({}),
+      clear: jest.fn().mockResolvedValue({})
+    },
     sync: {
       get: jest.fn().mockResolvedValue({}),
       set: jest.fn().mockResolvedValue({}),

@@ -5,9 +5,10 @@
 
 module.exports = {
   displayName: 'spAI-Defender Tests',
-  testEnvironment: 'jsdom',
+  testEnvironment: '<rootDir>/tests/setup/jsdom-environment.cjs',
   rootDir: './',
   testMatch: ['**/tests/**/*.test.js'],
+  testPathIgnorePatterns: ['/node_modules/', '/dist/'],
   collectCoverageFrom: [
     'chrome-extension/src/**/*.js',
     '!chrome-extension/src/**/*.test.js',
@@ -71,11 +72,11 @@ module.exports = {
   testTimeout: 10000,
 
   // Collect coverage from all files
-  collectCoverage: true,
+  collectCoverage: false,
 
   // Transform files with Babel
   transform: {
     '^.+\\.jsx?$': 'babel-jest'
   },
-  transformIgnorePatterns: ['node_modules/(?!(jest-chrome)/)']
+  transformIgnorePatterns: ['/node_modules/']
 };

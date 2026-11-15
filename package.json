@@ -4,20 +4,21 @@
   "description": "Chrome extension for detecting phishing and social engineering attacks",
   "type": "module",
   "scripts": {
+    "build": "vite build",
+    "dev": "vite",
     "test": "jest --config jest.config.cjs",
     "test:watch": "jest --config jest.config.cjs --watch",
-    "test:coverage": "jest --config jest.config.cjs --coverage"
-  },
-  "dependencies": {
-    "@anthropic-ai/claude-code": "^2.0.72"
+    "test:coverage": "jest --config jest.config.cjs --coverage",
+    "eval": "node eval/run-eval.mjs",
+    "eval:fetch-fraud-br": "node eval/scripts/fetch-fraud-br.mjs"
   },
   "devDependencies": {
     "@babel/core": "^7.28.5",
     "@babel/preset-env": "^7.28.5",
-    "babel-jest": "^30.2.0",
-    "jest": "^27.5.1",
-    "jest-chrome": "^0.8.0",
-    "jest-environment-jsdom": "^27.5.1",
-    "playwright": "^1.47.0"
+    "@crxjs/vite-plugin": "^3.0.0",
+    "babel-jest": "^30.5.2",
+    "jest": "^30.5.2",
+    "jest-environment-jsdom": "^30.5.2",
+    "vite": "^8.3.8"
   }
 }

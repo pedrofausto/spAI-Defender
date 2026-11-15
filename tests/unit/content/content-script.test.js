@@ -2,6 +2,10 @@
  * Content script behavior tests
  */
 
+function setTestUrl(url) {
+  global.__jsdom.reconfigure({ url });
+}
+
 function renderContentPage() {
   document.body.innerHTML = `
     <header>Header</header>
@@ -65,10 +69,7 @@ describe('content script message handling', () => {
   beforeEach(() => {
     delete window.__spaiDefenderContentScript;
     renderContentPage();
-    Object.defineProperty(window, 'location', {
-      value: new URL('https://example.test/page'),
-      configurable: true
-    });
+    setTestUrl('https://web.telegram.org/k/');
   });
 
   afterEach(() => {
@@ -77,63 +78,31 @@ describe('content script message handling', () => {
     document.body.innerHTML = '';
   });
 
-  test('registers message listener and extracts structured page content', async () => {
+  test('stays idle on Telegram Web: answers pings, reports not ready, and sends nothing', async () => {
     const listeners = await importContentScript();
+    await new Promise(resolve => setTimeout(resolve, 50));
 
-    const result = sendContentMessage(listeners.message, { type: 'EXTRACT_CONTENT' });
+    const ping = sendContentMessage(listeners.message, { type: 'SPAI_PING' });
+    expect(ping.keepAlive).toBe(true);
+    expect(ping.response).toMatchObject({ success: true, ready: true });
 
-    expect(result.keepAlive).toBe(true);
-    expect(result.response.success).toBe(true);
-    expect(result.response.content).toMatchObject({
-      url: 'https://example.test/page',
-      title: 'Content Test Page'
-    });
-    expect(result.response.content.headings).toEqual([{ level: 1, text: 'Security Awareness', id: 'main-title' }]);
-    expect(result.response.content.paragraphs).toContain('Legitimate paragraph about urgent security training.');
-    expect(result.response.content.links[0]).toMatchObject({ text: 'External link', external: true });
-    expect(result.response.content.tables[0].rows).toEqual([['Name'], ['Value']]);
+    const extract = sendContentMessage(listeners.message, { type: 'EXTRACT_CONTENT' });
+    expect(extract.response).toEqual({ success: false, error: 'PLATFORM_NOT_READY' });
+
+    expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+    expect(document.querySelector('.spai-highlighted, .spai-image-container')).toBeNull();
+    expect(console.error).not.toHaveBeenCalled();
   });
 
-  test('extracts selection text with context and position', async () => {
-    const listeners = await importContentScript();
-    const range = document.createRange();
-    const selected = document.getElementById('selectable').firstChild;
-    range.setStart(selected, 0);
-    range.setEnd(selected, 8);
-    range.getBoundingClientRect = () => ({ top: 1, left: 2, width: 3, height: 4 });
-    window.getSelection().removeAllRanges();
-    window.getSelection().addRange(range);
-
-    const result = sendContentMessage(listeners.message, { type: 'EXTRACT_SELECTION' });
-
-    expect(result.response).toMatchObject({
-      success: true,
-      selection: {
-        text: 'Selected',
-        context: { tagName: 'P', className: '', id: 'selectable' },
-        position: { top: 1, left: 2, width: 3, height: 4 }
-      }
-    });
-  });
-
-  test('starts and stops content monitoring through messages', async () => {
+  test('does not respond to removed generic page messages', async () => {
     const listeners = await importContentScript();
 
-    expect(sendContentMessage(listeners.message, { type: 'START_MONITORING' }).response).toEqual({
-      success: true,
-      message: 'Content monitoring started'
-    });
-    expect(sendContentMessage(listeners.message, { type: 'START_MONITORING' }).response).toEqual({
-      success: false,
-      error: 'Monitoring already active'
-    });
-    expect(sendContentMessage(listeners.message, { type: 'STOP_MONITORING' }).response).toEqual({
-      success: true,
-      message: 'Content monitoring stopped'
-    });
+    for (const type of ['EXTRACT_SELECTION', 'START_MONITORING', 'STOP_MONITORING', 'GET_PAGE_INFO']) {
+      expect(sendContentMessage(listeners.message, { type }).response).toEqual({ error: 'Unknown message type' });
+    }
   });
 
-  test('keeps the disabled security badge widget removed even when requested', async () => {
+  test('ignores requests for the removed security badge widget', async () => {
     const listeners = await importContentScript();
 
     const result = sendContentMessage(listeners.message, {
@@ -141,25 +110,18 @@ describe('content script message handling', () => {
       data: { riskLevel: 'HIGH', riskScore: 90, indicators: ['<img src=x onerror=alert(1)>'] }
     });
 
-    expect(result.response).toEqual({ success: true });
+    expect(result.response).toEqual({ error: 'Unknown message type' });
     expect(document.getElementById('spai-security-badge')).toBeNull();
   });
 
-  test('returns page info and unknown message errors', async () => {
+  test('returns an error for unknown message types', async () => {
     const listeners = await importContentScript();
 
-    expect(sendContentMessage(listeners.message, { type: 'GET_PAGE_INFO' }).response).toMatchObject({
-      success: true,
-      info: { url: 'https://example.test/page', title: 'Content Test Page' }
-    });
     expect(sendContentMessage(listeners.message, { type: 'UNKNOWN' }).response).toEqual({ error: 'Unknown message type' });
   });
 
   test('extracts WhatsApp chat content from the main pane without sidebar messages', async () => {
-    Object.defineProperty(window, 'location', {
-      value: new URL('https://web.whatsapp.com/'),
-      configurable: true
-    });
+    setTestUrl('https://web.whatsapp.com/');
     document.body.innerHTML = `
       <div id="pane-side">
         <div role="row"><span class="selectable-text"><span>Sidebar preview should not be exported</span></span></div>
@@ -187,10 +149,7 @@ describe('content script message handling', () => {
   });
 
   test('extracts only visible WhatsApp messages from the main pane', async () => {
-    Object.defineProperty(window, 'location', {
-      value: new URL('https://web.whatsapp.com/'),
-      configurable: true
-    });
+    setTestUrl('https://web.whatsapp.com/');
     document.body.innerHTML = `
       <div id="main" role="main">
         <header><span dir="auto" title="Security Team">Security Team</span></header>
@@ -217,10 +176,7 @@ describe('content script message handling', () => {
     expect(result.response.content.stats.paragraphCount).toBe(1);
   });
   test('reanalyzes newly visible WhatsApp messages after scroll changes the viewport', async () => {
-    Object.defineProperty(window, 'location', {
-      value: new URL('https://web.whatsapp.com/'),
-      configurable: true
-    });
+    setTestUrl('https://web.whatsapp.com/');
     document.body.innerHTML = `
       <div id="main" role="main">
         <header><span dir="auto" title="Security Team">Security Team</span></header>
@@ -265,10 +221,7 @@ describe('content script message handling', () => {
   });
 
   test('publishes WhatsApp snapshot only after debounce when chat changes', async () => {
-    Object.defineProperty(window, 'location', {
-      value: new URL('https://web.whatsapp.com/'),
-      configurable: true
-    });
+    setTestUrl('https://web.whatsapp.com/');
     document.body.innerHTML = `
       <div id="main" role="main">
         <header><span dir="auto" title="Security Team">Security Team</span></header>
@@ -281,9 +234,8 @@ describe('content script message handling', () => {
     document.querySelector('#main').appendChild(document.createElement('div'));
     await new Promise(resolve => setTimeout(resolve, 650));
 
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'CONTENT_SCRIPT_READY',
-      url: 'https://web.whatsapp.com/'
+    expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({
+      type: 'CONTENT_SCRIPT_READY'
     }));
     expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
       type: 'WHATSAPP_CHAT_SNAPSHOT',
@@ -296,7 +248,7 @@ describe('content script message handling', () => {
 
 
   test('stops runtime messaging after the extension context is invalidated', async () => {
-    Object.defineProperty(window, 'location', { value: new URL('https://web.whatsapp.com/'), configurable: true });
+    setTestUrl('https://web.whatsapp.com/');
     document.body.innerHTML = `<div id="main" role="main"><header><span dir="auto" title="Security Team">Security Team</span></header><div role="row" data-id="m1"><div class="message-in"><span class="selectable-text"><span>Review this login</span></span></div></div></div>`;
     document.body.innerText = document.body.textContent;
 
@@ -316,10 +268,7 @@ describe('content script message handling', () => {
 
 
   test('outlines only validated malicious WhatsApp bubbles without styling message text', async () => {
-    Object.defineProperty(window, 'location', {
-      value: new URL('https://web.whatsapp.com/'),
-      configurable: true
-    });
+    setTestUrl('https://web.whatsapp.com/');
     document.body.innerHTML = `
       <div id="main" role="main">
         <header><span dir="auto" title="Security Team">Security Team</span></header>
@@ -353,14 +302,11 @@ describe('content script message handling', () => {
   });
 
   test('shows local heuristic yellow highlight before the final Nano-backed result escalates to red', async () => {
-    Object.defineProperty(window, 'location', {
-      value: new URL('https://web.whatsapp.com/'),
-      configurable: true
-    });
+    setTestUrl('https://web.whatsapp.com/');
     document.body.innerHTML = `
       <div id="main" role="main">
         <header><span dir="auto" title="Security Team">Security Team</span></header>
-        <div role="row" data-id="pending-risk"><div class="message-in"><div class="copyable-text" data-pre-plain-text="[10:00] Unknown:"><span class="selectable-text"><span>Prize claim available. Click here.</span></span></div></div></div>
+        <div role="row" data-id="pending-risk"><div class="message-in"><div class="copyable-text" data-pre-plain-text="[10:00] Unknown:"><span class="selectable-text"><span>Oi mae, troquei de numero, esse e meu numero novo. Preciso que voce faca um pix de 800 reais urgente pra mim, depois te devolvo.</span></span></div></div></div>
       </div>
     `;
     document.body.innerText = document.body.textContent;
@@ -384,11 +330,87 @@ describe('content script message handling', () => {
     expect(bubble.classList.contains('spai-suspicious-message')).toBe(false);
     delete global.__contentRuntimeResponder;
   });
+  test('keeps the local pre-highlight when the AI result is safe but local rules still flag the message', async () => {
+    setTestUrl('https://web.whatsapp.com/');
+    document.body.innerHTML = `
+      <div id="main" role="main">
+        <header><span dir="auto" title="Security Team">Security Team</span></header>
+        <div role="row" data-id="local-only"><div class="message-in"><div class="copyable-text" data-pre-plain-text="[10:00] Unknown:"><span class="selectable-text"><span>Oi mae, troquei de numero, esse e meu numero novo. Preciso que voce faca um pix de 800 reais urgente pra mim, depois te devolvo.</span></span></div></div></div>
+      </div>
+    `;
+    document.body.innerText = document.body.textContent;
+    global.__contentRuntimeResponder = message => {
+      if (message.type !== 'DETECT_PHISHING') return { success: true };
+      return {
+        success: true,
+        analysis: { status: 'VALID', classification: 'SAFE', riskLevel: 'LOW', riskScore: 3, confidence: 90 }
+      };
+    };
+
+    await importContentScript();
+    await new Promise(resolve => setTimeout(resolve, 1200));
+
+    const bubble = document.querySelector('[data-id="local-only"] .message-in');
+    expect(bubble.classList.contains('spai-suspicious-message')).toBe(true);
+    delete global.__contentRuntimeResponder;
+  });
+
+  test.each([
+    ['bank warning (local rules see low risk)', 'in', 'Banco: nunca pedimos seu codigo, senha ou token por mensagem. Nao compartilhe com ninguem.'],
+    ['outgoing scam-looking message', 'out', 'Oi mae, troquei de numero, esse e meu numero novo. Preciso que voce faca um pix de 800 reais urgente pra mim, depois te devolvo.']
+  ])('does not locally pre-highlight a %s', async (_label, direction, text) => {
+    setTestUrl('https://web.whatsapp.com/');
+    document.body.innerHTML = `
+      <div id="main" role="main">
+        <header><span dir="auto" title="Contact">Contact</span></header>
+        <div role="row" data-id="no-pre"><div class="message-${direction}"><div class="copyable-text" data-pre-plain-text="[10:00] Someone:"><span class="selectable-text"><span>${text}</span></span></div></div></div>
+      </div>
+    `;
+    document.body.innerText = document.body.textContent;
+    global.__contentRuntimeResponder = message => {
+      if (message.type !== 'DETECT_PHISHING') return { success: true };
+      return new Promise(resolve => setTimeout(() => resolve({
+        success: true,
+        analysis: { status: 'VALID', classification: 'SAFE', riskLevel: 'LOW', riskScore: 2, confidence: 90 }
+      }), 1200));
+    };
+
+    await importContentScript();
+    await new Promise(resolve => setTimeout(resolve, 700));
+
+    const bubble = document.querySelector(`[data-id="no-pre"] .message-${direction}`);
+    expect(bubble.classList.contains('spai-suspicious-message')).toBe(false);
+    expect(bubble.classList.contains('spai-malicious-message')).toBe(false);
+    await new Promise(resolve => setTimeout(resolve, 1300));
+    delete global.__contentRuntimeResponder;
+  });
+
+  test('does not log WhatsApp message text while analyzing messages', async () => {
+    setTestUrl('https://web.whatsapp.com/');
+    document.body.innerHTML = `
+      <div id="main" role="main">
+        <header><span dir="auto" title="Security Team">Security Team</span></header>
+        <div role="row" data-id="private"><div class="message-in"><div class="copyable-text" data-pre-plain-text="[10:00] Unknown:"><span class="selectable-text"><span>PRIVATE-MESSAGE-TEXT-ZQ claim your prize</span></span></div></div></div>
+      </div>
+    `;
+    document.body.innerText = document.body.textContent;
+    global.__contentRuntimeResponder = message => {
+      if (message.type !== 'DETECT_PHISHING') return { success: true };
+      return { success: true, analysis: { status: 'VALID', classification: 'SAFE', riskLevel: 'LOW', riskScore: 3, confidence: 90 } };
+    };
+    const logSpy = jest.spyOn(console, 'log');
+
+    await importContentScript();
+    await new Promise(resolve => setTimeout(resolve, 1200));
+
+    const logged = logSpy.mock.calls.map(args => args.map(String).join(' ')).join('\n');
+    expect(logged).not.toContain('PRIVATE-MESSAGE-TEXT-ZQ');
+    logSpy.mockRestore();
+    delete global.__contentRuntimeResponder;
+  });
+
   test('uses amber outline for medium-risk WhatsApp messages without escalating to malicious red', async () => {
-    Object.defineProperty(window, 'location', {
-      value: new URL('https://web.whatsapp.com/'),
-      configurable: true
-    });
+    setTestUrl('https://web.whatsapp.com/');
     document.body.innerHTML = `
       <div id="main" role="main">
         <header><span dir="auto" title="Security Team">Security Team</span></header>
