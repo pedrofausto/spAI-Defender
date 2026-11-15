@@ -1,4 +1,4 @@
-import { evaluateLocalMessageRisk, isLocalPrehighlightCandidate, localRulesSeeLowRisk } from './local-prehighlight.js';
+import { evaluateLocalMessageRisk, isAiAnalysisCandidate, isLocalPrehighlightCandidate, localRulesSeeLowRisk } from './local-prehighlight.js';
 
 (() => {
 const SPAI_CONTENT_SCRIPT_RUNTIME_KEY = '__spaiDefenderContentScript';
@@ -1179,7 +1179,9 @@ async function analyzeAndHighlightMessages(options = {}) {
         console.log(`📊 Message breakdown: ${incomingCount} incoming, ${outgoingCount} outgoing, ${unknownCount} unknown`);
 
         // Reanalyze the currently visible window only for messages that have not been processed yet.
+        // Outgoing messages are never sent to the AI (same direction rule as the pre-highlight).
         const visibleMessagesNeedingAnalysis = messages.filter(msg => {
+            if (!isAiAnalysisCandidate(msg)) return false;
             if (msg.element.dataset.spaiAnalyzed === 'pending') return false;
             if (forceAllVisible) return true;
             return msg.element.dataset.spaiAnalyzed !== 'true';
@@ -1414,7 +1416,7 @@ async function analyzeCurrentWhatsAppChat() {
         // Clear previous highlights
         document.querySelectorAll('.spai-suspicious-overlay').forEach(el => el.remove());
 
-        for (const message of messages) {
+        for (const message of messages.filter(isAiAnalysisCandidate)) {
             const response = await chrome.runtime.sendMessage({
                 type: 'DETECT_PHISHING',
                 data: {

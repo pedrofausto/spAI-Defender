@@ -181,7 +181,7 @@ describe('content script message handling', () => {
       <div id="main" role="main">
         <header><span dir="auto" title="Security Team">Security Team</span></header>
         <div role="row" data-id="visible"><div class="message-in"><span class="selectable-text"><span>Visible current message</span></span></div></div>
-        <div role="row" data-id="future"><div class="message-out"><span class="selectable-text"><span>Future suspicious message</span></span></div></div>
+        <div role="row" data-id="future"><div class="message-in"><span class="selectable-text"><span>Future suspicious message</span></span></div></div>
       </div>
     `;
     document.body.innerText = document.body.textContent;
@@ -440,3 +440,73 @@ describe('content script message handling', () => {
 
 
 
+
+describe('AI analysis skips outgoing WhatsApp messages', () => {
+  beforeEach(() => {
+    delete window.__spaiDefenderContentScript;
+    renderContentPage();
+    setTestUrl('https://web.whatsapp.com/');
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    delete window.__spaiDefenderContentScript;
+    delete global.__contentRuntimeResponder;
+    document.body.innerHTML = '';
+  });
+
+  test('sends DETECT_PHISHING for incoming and undetermined messages but never for outgoing ones', async () => {
+    document.body.innerHTML = `
+      <div id="main" role="main">
+        <header><span dir="auto" title="Family">Family</span></header>
+        <div role="row" data-id="in-msg"><div class="message-in"><div class="copyable-text" data-pre-plain-text="[10:00] Mae:"><span class="selectable-text"><span>Incoming question about groceries</span></span></div></div></div>
+        <div role="row" data-id="out-msg"><div class="message-out"><div class="copyable-text" data-pre-plain-text="[10:01] You:"><span class="selectable-text"><span>Outgoing reply about the pix transfer</span></span></div></div></div>
+        <div role="row" data-id="unknown-msg"><div class="copyable-text" data-pre-plain-text="[10:02] Unknown:"><span class="selectable-text"><span>Undetermined direction message about a code</span></span></div></div>
+      </div>
+    `;
+    document.body.innerText = document.body.textContent;
+    const mainPane = document.querySelector('#main');
+    mainPane.getBoundingClientRect = () => ({ top: 0, bottom: 600, left: 0, right: 800, width: 800, height: 600 });
+    [['in-msg', 100], ['out-msg', 200], ['unknown-msg', 300]].forEach(([id, top]) => {
+      document.querySelector(`[data-id="${id}"]`).getBoundingClientRect = () => ({ top, bottom: top + 80, left: 0, right: 700, width: 700, height: 80 });
+    });
+    const analyzedContents = [];
+    global.__contentRuntimeResponder = message => {
+      if (message.type === 'DETECT_PHISHING') {
+        analyzedContents.push(message.data.content);
+        return { success: true, analysis: { status: 'VALID', classification: 'SAFE', riskLevel: 'LOW', riskScore: 3, confidence: 90 } };
+      }
+      return { success: true };
+    };
+
+    await importContentScript();
+    await new Promise(resolve => setTimeout(resolve, 1200));
+
+    expect(analyzedContents).toEqual(expect.arrayContaining([
+      'Incoming question about groceries',
+      'Undetermined direction message about a code'
+    ]));
+    expect(analyzedContents).not.toContain('Outgoing reply about the pix transfer');
+  });
+
+  test('the outgoing message is left unanalyzed so it gets no AI highlight', async () => {
+    document.body.innerHTML = `
+      <div id="main" role="main">
+        <header><span dir="auto" title="Family">Family</span></header>
+        <div role="row" data-id="out-only"><div class="message-out"><div class="copyable-text" data-pre-plain-text="[10:01] You:"><span class="selectable-text"><span>Outgoing reply about the pix transfer</span></span></div></div></div>
+      </div>
+    `;
+    document.body.innerText = document.body.textContent;
+    const requests = [];
+    global.__contentRuntimeResponder = message => {
+      if (message.type === 'DETECT_PHISHING') requests.push(message);
+      return { success: true };
+    };
+
+    await importContentScript();
+    await new Promise(resolve => setTimeout(resolve, 1200));
+
+    expect(requests).toHaveLength(0);
+    expect(document.querySelector('[data-id="out-only"] .message-out').dataset.spaiAnalyzed).not.toBe('true');
+  });
+});

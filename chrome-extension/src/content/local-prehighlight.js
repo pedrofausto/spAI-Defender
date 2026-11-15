@@ -43,6 +43,14 @@ export function isLocalPrehighlightCandidate(message) {
   return Boolean(message) && message.direction !== 'out';
 }
 
+/**
+ * Only incoming (or undetermined) messages are sent to the AI analysis. Outgoing messages are the user's own
+ * text, so they get neither the AI call nor the pre-highlight. Uses the same direction rule as the pre-highlight.
+ */
+export function isAiAnalysisCandidate(message) {
+  return isLocalPrehighlightCandidate(message);
+}
+
 /** True when local rules agree the message is low risk (below the scam threshold). */
 export function localRulesSeeLowRisk(text) {
   return !evaluateLocalMessageRisk(text).severity;

@@ -4,6 +4,7 @@
 import {
   evaluateLocalMessageRisk,
   isLocalPrehighlightCandidate,
+  isAiAnalysisCandidate,
   localRulesSeeLowRisk,
   LOCAL_PREHIGHLIGHT_MEDIUM_THRESHOLD,
   LOCAL_PREHIGHLIGHT_HIGH_THRESHOLD
@@ -15,6 +16,19 @@ import path from 'path';
 
 const NEW_NUMBER_PIX = 'Oi mae, troquei de numero, esse e meu numero novo. Preciso que voce faca um pix de 800 reais urgente pra mim, depois te devolvo.';
 const BANK_WARNING = 'Banco: nunca pedimos seu codigo, senha ou token por mensagem. Nao compartilhe com ninguem.';
+
+describe('AI analysis candidate rule', () => {
+  test('outgoing messages are never sent to AI, same as the pre-highlight rule', () => {
+    expect(isAiAnalysisCandidate({ direction: 'out' })).toBe(false);
+    expect(isAiAnalysisCandidate({ direction: 'out' })).toBe(isLocalPrehighlightCandidate({ direction: 'out' }));
+  });
+
+  test('incoming and undetermined messages are sent to AI', () => {
+    expect(isAiAnalysisCandidate({ direction: 'in' })).toBe(true);
+    expect(isAiAnalysisCandidate({ direction: 'unknown' })).toBe(true);
+    expect(isAiAnalysisCandidate(null)).toBe(false);
+  });
+});
 
 describe('local pre-highlight uses scam-rules', () => {
   test('thresholds align with the detector scam threshold', () => {
