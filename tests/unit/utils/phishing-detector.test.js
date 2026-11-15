@@ -781,6 +781,55 @@ describe('PhishingDetector', () => {
       expect(setCall.threats.length).toBe(2);
     });
 
+    test('persists only classification, platform, counts and risk metadata', async () => {
+      await detector.trackThreat('https://bank.example/login?token=abc123', {
+        riskLevel: 'HIGH',
+        riskScore: 82,
+        classification: 'SCAM',
+        platform: 'WHATSAPP',
+        semanticSignals: ['payment_request', 'urgent_action'],
+        evidence: ['send the pix now'],
+        title: 'Private title',
+        sender: '+55 11 99999-9999',
+        text: 'private message body'
+      });
+
+      const record = chrome.storage.local.set.mock.calls[0][0].threats[0];
+      expect(Object.keys(record).sort()).toEqual(
+        ['classification', 'evidenceCount', 'platform', 'riskLevel', 'riskScore', 'signalCount', 'timestamp']
+      );
+      expect(record).toMatchObject({
+        riskLevel: 'HIGH', riskScore: 82, classification: 'SCAM', platform: 'WHATSAPP', signalCount: 2, evidenceCount: 1
+      });
+      const serialized = JSON.stringify(record);
+      ['bank.example', 'abc123', 'send the pix', '99999', 'Private title', 'private message body'].forEach((secret) => {
+        expect(serialized).not.toContain(secret);
+      });
+    });
+
+    test('falls back to UNKNOWN classification and UNKNOWN platform for unrecognised values', async () => {
+      await detector.trackThreat('https://example.com', { riskLevel: 'LOW', riskScore: 10, classification: 'free text', platform: 'https://evil' });
+
+      const record = chrome.storage.local.set.mock.calls[0][0].threats[0];
+      expect(record).toMatchObject({ classification: 'UNKNOWN', platform: 'UNKNOWN', signalCount: 0, evidenceCount: 0 });
+    });
+
+    test('keeps only records from the last 7 days and at most 250 records', async () => {
+      const day = 24 * 60 * 60 * 1000;
+      const now = Date.now();
+      const stale = { riskLevel: 'HIGH', riskScore: 70, timestamp: new Date(now - 8 * day).toISOString() };
+      const fresh = Array.from({ length: 260 }, (_, i) => ({
+        riskLevel: 'LOW', riskScore: 10, timestamp: new Date(now - i * 1000).toISOString()
+      }));
+      chrome.storage.local.get = jest.fn().mockResolvedValue({ threats: [stale, ...fresh] });
+
+      await detector.trackThreat('https://example.com', { riskLevel: 'HIGH', riskScore: 80 });
+
+      const threats = chrome.storage.local.set.mock.calls[0][0].threats;
+      expect(threats).toHaveLength(250);
+      expect(threats.every(t => Date.parse(t.timestamp) >= now - 7 * day)).toBe(true);
+    });
+
     test('should update threatsToday count in storage', async () => {
       detector.threatsToday = 5;
       await detector.trackThreat('https://example.com', { riskLevel: 'HIGH' });
@@ -798,6 +847,64 @@ describe('PhishingDetector', () => {
       expect(consoleErrorSpy).toHaveBeenCalled();
 
       consoleErrorSpy.mockRestore();
+    });
+  });
+
+  describe('migrateThreatHistory (service worker start)', () => {
+    beforeEach(() => {
+      chrome.storage.local.set = jest.fn().mockResolvedValue({});
+    });
+
+    test('rewrites legacy records that still carry URLs, titles or evidence text', async () => {
+      chrome.storage.local.get = jest.fn().mockResolvedValue({
+        threats: [{
+          url: 'https://old.example/private',
+          title: 'Private title',
+          redFlags: ['private text'],
+          evidence: ['quoted message'],
+          riskLevel: 'HIGH',
+          riskScore: 80,
+          timestamp: new Date().toISOString()
+        }]
+      });
+
+      const result = await detector.migrateThreatHistory();
+
+      expect(result).toEqual({ migrated: true, total: 1 });
+      const written = chrome.storage.local.set.mock.calls[0][0].threats;
+      expect(written).toHaveLength(1);
+      expect(written[0]).toMatchObject({ riskLevel: 'HIGH', riskScore: 80 });
+      const serialized = JSON.stringify(written);
+      ['old.example', 'Private title', 'private text', 'quoted message'].forEach((secret) => {
+        expect(serialized).not.toContain(secret);
+      });
+    });
+
+    test('does not write storage when the history is already clean', async () => {
+      const clean = { riskLevel: 'LOW', riskScore: 12, timestamp: new Date().toISOString() };
+      chrome.storage.local.get = jest.fn().mockResolvedValue({ threats: [clean] });
+
+      const result = await detector.migrateThreatHistory();
+
+      expect(result).toEqual({ migrated: false, total: 1 });
+      expect(chrome.storage.local.set).not.toHaveBeenCalled();
+    });
+
+    test('does nothing when no threat history exists', async () => {
+      chrome.storage.local.get = jest.fn().mockResolvedValue({});
+
+      const result = await detector.migrateThreatHistory();
+
+      expect(result).toEqual({ migrated: false, total: 0 });
+      expect(chrome.storage.local.set).not.toHaveBeenCalled();
+    });
+
+    test('resolves without throwing when storage fails', async () => {
+      chrome.storage.local.get = jest.fn().mockRejectedValue(new Error('storage down'));
+      jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+      await expect(detector.migrateThreatHistory()).resolves.toEqual({ migrated: false, total: 0 });
+      console.warn.mockRestore();
     });
   });
 

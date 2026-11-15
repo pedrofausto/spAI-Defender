@@ -2,7 +2,7 @@
  * Background service worker behavior tests
  */
 
-function setupBackgroundChrome() {
+function setupBackgroundChrome(localData = {}) {
   const listeners = { message: null, installed: null, updated: null, activated: null };
   global.chrome = {
     runtime: {
@@ -35,7 +35,10 @@ function setupBackgroundChrome() {
     },
     storage: {
       local: {
-        get: jest.fn().mockResolvedValue({}),
+        get: jest.fn(async (keys) => {
+          const wanted = Array.isArray(keys) ? keys : [keys];
+          return Object.fromEntries(Object.entries(localData).filter(([key]) => wanted.includes(key)));
+        }),
         set: jest.fn().mockResolvedValue({}),
         remove: jest.fn().mockResolvedValue({})
       },
@@ -64,9 +67,9 @@ function setupBackgroundChrome() {
   return listeners;
 }
 
-async function importBackground() {
+async function importBackground(localData = {}) {
   jest.resetModules();
-  const listeners = setupBackgroundChrome();
+  const listeners = setupBackgroundChrome(localData);
   jest.spyOn(console, 'log').mockImplementation(() => {});
   jest.spyOn(console, 'warn').mockImplementation(() => {});
   jest.spyOn(console, 'error').mockImplementation(() => {});
@@ -397,6 +400,26 @@ describe('background service worker message routing', () => {
     await importBackground();
 
     expect(chrome.storage.local.remove).toHaveBeenCalledWith(expect.arrayContaining(['lastWhatsAppSnapshot', 'whatsAppChatHistory']));
+  });
+
+  test('sanitizes legacy threat history with URLs and evidence text on service worker start', async () => {
+    await importBackground({
+      threats: [{
+        url: 'https://legacy.example/private',
+        redFlags: ['private message text'],
+        riskLevel: 'HIGH',
+        riskScore: 77,
+        timestamp: new Date().toISOString()
+      }]
+    });
+    for (let i = 0; i < 20 && chrome.storage.local.set.mock.calls.length === 0; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+
+    expect(chrome.storage.local.set).toHaveBeenCalledTimes(1);
+    const written = chrome.storage.local.set.mock.calls[0][0].threats;
+    expect(written[0]).toMatchObject({ riskLevel: 'HIGH', riskScore: 77 });
+    expect(JSON.stringify(written)).not.toMatch(/legacy\.example|private message text/);
   });
 
   test('does not return raw page HTML from the injected extractor', async () => {

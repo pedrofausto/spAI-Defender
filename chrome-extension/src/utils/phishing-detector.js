@@ -10,6 +10,17 @@ import { LocalAIThreatClassifier } from './local-ai-threat-classifier.js';
 import { QUICK_DETECT_PATTERNS } from './message-risk-patterns.js';
 import { scoreMessage } from './scam-rules.js';
 
+const THREAT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const THREAT_HISTORY_LIMIT = 250;
+const THREAT_CLASSIFICATIONS = new Set(['SAFE', 'SUSPICIOUS', 'PHISHING', 'SCAM', 'SOCIAL_ENGINEERING', 'INCONCLUSIVE', 'UNKNOWN']);
+const THREAT_PLATFORMS = new Set(['WEB', 'WHATSAPP', 'TELEGRAM', 'GMAIL', 'OUTLOOK']);
+const THREAT_RECORD_FIELDS = new Set(['timestamp', 'riskLevel', 'riskScore', 'classification', 'platform', 'signalCount', 'evidenceCount']);
+
+function boundedCount(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(0, Math.min(100, Math.round(number))) : 0;
+}
+
 export class PhishingDetector {
   constructor(aiManager) {
     this.aiManager = aiManager;
@@ -249,7 +260,7 @@ export class PhishingDetector {
     // Track threats - Lower threshold for better detection (was 70, now 50)
     if (mergedAnalysis.isPhishing || mergedAnalysis.finalRiskScore > 50) {
       this.threatsToday++;
-      this.trackThreat(url, mergedAnalysis);
+      this.trackThreat(url, { ...mergedAnalysis, platform: 'WEB' });
     }
 
     return mergedAnalysis;
@@ -456,22 +467,74 @@ export class PhishingDetector {
       };
     }
   }
+  /**
+   * Keeps only non-identifying threat metadata. URLs, titles, senders, message text and evidence strings
+   * are never persisted; counts stand in for the evidence. Records older than 7 days are dropped and at
+   * most 250 records are kept.
+   */
   sanitizeThreatHistory(threats, now = Date.now()) {
     if (!Array.isArray(threats)) return [];
-    const cutoff = now - (7 * 24 * 60 * 60 * 1000);
+    const cutoff = now - THREAT_RETENTION_MS;
     return threats.map(threat => {
       const parsed = Date.parse(threat?.timestamp);
       const timestamp = Number.isFinite(parsed) ? new Date(parsed).toISOString() : new Date(now).toISOString();
+      const platform = String(threat?.platform || '').toUpperCase();
       return {
+        timestamp,
         riskLevel: typeof threat?.riskLevel === 'string' ? threat.riskLevel : 'UNKNOWN',
         riskScore: Number.isFinite(Number(threat?.riskScore)) ? Math.max(0, Math.min(100, Number(threat.riskScore))) : 0,
-        timestamp
+        classification: THREAT_CLASSIFICATIONS.has(threat?.classification) ? threat.classification : 'UNKNOWN',
+        platform: THREAT_PLATFORMS.has(platform) ? platform : 'UNKNOWN',
+        signalCount: boundedCount(threat?.signalCount),
+        evidenceCount: boundedCount(threat?.evidenceCount)
       };
-    }).filter(threat => Date.parse(threat.timestamp) >= cutoff).slice(-250);
+    }).filter(threat => Date.parse(threat.timestamp) >= cutoff).slice(-THREAT_HISTORY_LIMIT);
   }
 
   /**
-   * Rastreia ameaça no storage
+   * Builds the one record that trackThreat persists. Only metadata is read from the analysis.
+   */
+  buildThreatRecord(analysis, now = Date.now()) {
+    const [record] = this.sanitizeThreatHistory([{
+      timestamp: new Date(now).toISOString(),
+      riskLevel: analysis?.riskLevel || 'UNKNOWN',
+      riskScore: Number(analysis?.riskScore) || 0,
+      classification: analysis?.classification,
+      platform: analysis?.platform,
+      signalCount: Array.isArray(analysis?.semanticSignals) ? analysis.semanticSignals.length : 0,
+      evidenceCount: Array.isArray(analysis?.evidence) ? analysis.evidence.length : 0
+    }], now);
+    return record;
+  }
+
+  /**
+   * Rewrites stored threat history on service worker start so legacy records that carry removed fields
+   * (URLs, titles, evidence text) are sanitized, and expired or excess records are pruned.
+   * Storage is written only when something actually changes.
+   */
+  async migrateThreatHistory(now = Date.now()) {
+    try {
+      const stored = await chrome.storage.local.get('threats');
+      const raw = stored?.threats;
+      if (!Array.isArray(raw)) return { migrated: false, total: 0 };
+
+      const hasRemovedFields = raw.some(record => record && typeof record === 'object' &&
+        Object.keys(record).some(key => !THREAT_RECORD_FIELDS.has(key)));
+      const sanitized = this.sanitizeThreatHistory(raw, now);
+      if (!hasRemovedFields && sanitized.length === raw.length) {
+        return { migrated: false, total: raw.length };
+      }
+
+      await chrome.storage.local.set({ threats: sanitized });
+      return { migrated: true, total: sanitized.length };
+    } catch (error) {
+      console.warn('Threat history migration failed:', error?.message || error);
+      return { migrated: false, total: 0 };
+    }
+  }
+
+  /**
+   * Rastreia ameaça no storage (metadata only, see sanitizeThreatHistory)
    */
   async trackThreat(_url, analysis) {
     try {
@@ -480,11 +543,7 @@ export class PhishingDetector {
       }
       const stored = await chrome.storage.local.get('threats') || { threats: [] };
       const threats = this.sanitizeThreatHistory(stored.threats);
-      threats.push({
-        riskLevel: analysis.riskLevel || 'UNKNOWN',
-        riskScore: Number(analysis.riskScore) || 0,
-        timestamp: new Date().toISOString()
-      });
+      threats.push(this.buildThreatRecord(analysis));
 
       await chrome.storage.local.set({ 
         threats: this.sanitizeThreatHistory(threats),

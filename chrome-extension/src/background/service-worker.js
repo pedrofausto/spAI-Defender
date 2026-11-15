@@ -1100,6 +1100,10 @@ async function removeLegacyWhatsAppStorage() {
 }
 
 removeLegacyWhatsAppStorage();
+// Threat history keeps metadata only. Rewrite legacy records that still hold removed fields.
+phishingDetector.migrateThreatHistory().catch((error) => {
+  console.warn('Threat history migration failed:', error?.message || error);
+});
 configureActionVisibility();
 
 console.log('spAI-Defender service worker loaded');
