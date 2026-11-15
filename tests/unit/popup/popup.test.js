@@ -18,7 +18,7 @@ function renderPopupDom() {
       <button id="extractBtn"></button><button id="customPromptBtn"></button><button id="technicalBtn"></button></div>
     <section id="promptSection" hidden><textarea id="promptInput"></textarea><button id="sendPromptBtn"></button><button id="cancelPromptBtn"></button></section>
     <section id="technicalSection" hidden><pre id="technicalContent"></pre><button id="closeTechnicalBtn"></button></section>
-    <div id="notice" hidden></div>
+    <div id="notice" hidden></div><p id="aiLanguageNote" hidden></p>
     <section id="modelDownload" hidden><button id="downloadModelBtn"></button><div id="downloadProgressFill"></div><span id="downloadProgressLabel"></span></section>
     <span data-i18n="reanalyze"></span><span data-i18n="evidence"></span>
   `;
@@ -121,6 +121,56 @@ describe('enterprise popup', () => {
     expect(document.getElementById('analysisStatus').textContent).toBe('Inconclusivo');
     expect(chrome.runtime.sendMessage.mock.calls.map(([message])=>message.type)).not.toContain('DETECT_PHISHING');
     expect(document.getElementById('chatHistoryList').textContent).toContain('Nenhum chat recente');
+  });
+
+  describe('Portuguese AI limitation note', () => {
+    const PT_BODY = 'Oi mae, esse e meu numero novo. Preciso que voce faca um pix urgente pra mim, nao conte pra ninguem.';
+    const setupWith = (availability, bodyText) => setupChrome({
+      CHECK_AI_AVAILABILITY:{success:true,availability},
+      GET_THREAT_STATS:{success:true,stats:{dashboard}},
+      GET_WHATSAPP_CHAT_HISTORY:{success:true,chats:[],recentChats:[],dangerousChats:[]},
+      GET_PLATFORM_INFO:{success:true,platform:'WEB'},
+      GET_TAB_CONTENT:{success:true,content:{title:'Page',url:'https://example.test',bodyText,stats:{wordCount:12}}},
+      DETECT_PHISHING:{success:true,analysis:{status:'VALID',classification:'SUSPICIOUS',riskLevel:'MEDIUM',riskScore:58,confidence:70,evidence:['x'],semanticSignals:[],language:'pt'}},
+      ANALYZE_SENTIMENT:{success:true,analysis:{valence:0,arousal:0,dominance:0}},
+      SUMMARIZE_CONTENT:{success:true,summary:'s'}
+    });
+    const note = () => document.getElementById('aiLanguageNote');
+
+    test('shows the English note for Portuguese content when the model is available', async () => {
+      setupWith('available', PT_BODY);
+      await importPopup();
+      expect(note().hidden).toBe(false);
+      expect(note().textContent).toBe('AI analysis has limited Portuguese support. Local rules are the main signal for this content.');
+    });
+
+    test('shows the pt-BR note in a pt-BR browser', async () => {
+      Object.defineProperty(global.navigator,'language',{value:'pt-BR',configurable:true});
+      setupWith('available', PT_BODY);
+      await importPopup();
+      expect(note().hidden).toBe(false);
+      expect(note().textContent).toContain('suporte limitado ao português');
+    });
+
+    test('stays hidden for English content', async () => {
+      setupWith('available', 'Please verify your account now and enter your password to keep access.');
+      await importPopup();
+      expect(note().hidden).toBe(true);
+      expect(note().textContent).toBe('');
+    });
+
+    test('stays hidden when the model is not available, even for Portuguese content', async () => {
+      setupWith('unavailable', PT_BODY);
+      await importPopup();
+      expect(note().hidden).toBe(true);
+    });
+
+    test('renders hostile page text as text only', async () => {
+      setupWith('available', PT_BODY + ' <img src=x onerror=alert(1)>');
+      await importPopup();
+      expect(note().querySelector('img')).toBeNull();
+      expect(note().textContent).not.toContain('<img');
+    });
   });
 
   test('forces WhatsApp visible reanalysis when the user clicks Reanalyze', async () => {

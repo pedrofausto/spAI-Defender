@@ -96,12 +96,10 @@ export class PhishingDetector {
       merged.classification = analysis?.classification || 'INCONCLUSIVE';
     }
 
-    // A low or SAFE verdict without AI evidence cannot stand against a strong heuristic signal.
-    const modelEvidenceCount = Array.isArray(analysis?.evidence)
-      ? analysis.evidence.length
-      : (Array.isArray(analysis?.redFlags) ? analysis.redFlags.length : 0);
+    // A low or SAFE verdict cannot stand against a strong heuristic signal, with or without model evidence.
+    // Rules are the primary signal (Gemini Nano may only raise risk, notably for Portuguese content).
     const lowVerdict = analysis?.classification === 'SAFE' || analysis?.riskLevel === 'LOW';
-    if (lowVerdict && modelEvidenceCount === 0 && heuristicScore >= 55) {
+    if (lowVerdict && heuristicScore >= 55) {
       merged.status = 'INCONCLUSIVE';
       merged.classification = 'INCONCLUSIVE';
       if (merged.recommendation === 'SAFE') merged.recommendation = 'CAUTION';

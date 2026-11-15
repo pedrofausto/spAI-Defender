@@ -16,6 +16,8 @@ Detection is layered. Each layer runs locally.
 - Gemini Nano: the service worker forwards message text to an offscreen document, which calls Chrome's built-in Prompt API (`LanguageModel`) with a structured, delimiter-guarded prompt. Only a validated malicious result escalates a highlight to red. When the model is unavailable the result is reported as inconclusive rather than guessed.
 - Supporting analyzers: sentiment, linguistic and emotion (valence, arousal, dominance) analyzers built on weighted phishing lexicons, combined by a hybrid scorer.
 
+Portuguese and the rules-primary policy: Portuguese is not a documented supported language of the Prompt API (documented: en, ja, es, de, fr; see docs/chrome-ai-verified.md). For Portuguese content the deterministic rules are therefore the primary decision maker. Gemini Nano may raise the risk but never lowers it below the rule score, and a SAFE AI verdict cannot clear a local pre-highlight unless the rules agree. When the model is available and the content looks Portuguese, the popup shows a note that AI analysis has limited Portuguese support. This has not been verified in a real Chrome build.
+
 ## Privacy
 
 - No network calls. The extension source contains no `fetch`, XHR or WebSocket usage, and all model inference uses the on-device Chrome built-in AI APIs.

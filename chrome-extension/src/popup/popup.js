@@ -1,5 +1,6 @@
 import { AVAILABILITY, normalizeAvailability, isAvailabilityReady } from '../utils/ai-availability.js';
 import { normalizeLanguageModelExpectations } from '../utils/ai-language-options.js';
+import { looksPortuguese } from '../utils/portuguese-hint.js';
 
 const translations = {
   en: {
@@ -16,7 +17,7 @@ const translations = {
     summarizing:'Generating local summary',complete:'Local analysis complete',partial:'Analysis completed with partial results',
     noEvidence:'No validated malicious evidence was observed.',storageUnavailable:'Local metrics unavailable',
     aiUnavailable:'Gemini Nano is unavailable. Risk remains inconclusive.',noContent:'No analyzable content was extracted.',
-    promptComplete:'Custom analysis completed.',yes:'Yes',no:'No',unknown:'Unknown',historyWindow:'days',localMetadataEvents:'local metadata events',recentChats:'Recent chats',dangerousChats:'Most dangerous chats',noRecentChats:'No recent WhatsApp chats yet.',noDangerousChats:'No dangerous WhatsApp chats yet.',highRisk:'High risk',mediumRisk:'Medium risk',visibleNow:'visible now',statusValid:'Valid',statusInconclusive:'Inconclusive',statusFailed:'Failed',classPhishing:'Phishing',classScam:'Scam',classSocialEngineering:'Social engineering',classSuspicious:'Suspicious',classSafe:'Safe',riskLow:'Low',riskMedium:'Medium',riskMediumHigh:'Medium high',riskHigh:'High',riskCritical:'Critical',platformWhatsApp:'WhatsApp',platformTelegram:'Telegram',platformGmail:'Gmail',platformOutlook:'Outlook',platformWeb:'Web',urgencyHigh:'High',urgencyMedium:'Medium',urgencyLow:'Low',trustLow:'Low',trustMedium:'Medium',trustHigh:'High',loadingCurrentTab:'Loading current tab...',awaitingAnalysis:'Awaiting analysis',localRecommendation:'Content remains local while Gemini Nano evaluates the active tab.',pendingLocalSummary:'Pending local analysis.',moreActions:'More actions',close:'Close',languageEnglish:'English',languagePortuguese:'Portuguese',chatInspector:'Selected chat',historicalPeak:'Historical peak',observations:'Observations',lastUpdated:'Last updated',noChatSelected:'Select a recent or dangerous chat to inspect its local metadata.',activeChat:'Active chat',selectedFromHistory:'Selected from local history',currentRiskHigh:'High',currentRiskMedium:'Medium',currentRiskLow:'Low',telegramNotReady:'Telegram Web support is coming soon. For now, spAI-Defender analyzes WhatsApp Web chats.'
+    promptComplete:'Custom analysis completed.',yes:'Yes',no:'No',unknown:'Unknown',historyWindow:'days',localMetadataEvents:'local metadata events',recentChats:'Recent chats',dangerousChats:'Most dangerous chats',noRecentChats:'No recent WhatsApp chats yet.',noDangerousChats:'No dangerous WhatsApp chats yet.',highRisk:'High risk',mediumRisk:'Medium risk',visibleNow:'visible now',statusValid:'Valid',statusInconclusive:'Inconclusive',statusFailed:'Failed',classPhishing:'Phishing',classScam:'Scam',classSocialEngineering:'Social engineering',classSuspicious:'Suspicious',classSafe:'Safe',riskLow:'Low',riskMedium:'Medium',riskMediumHigh:'Medium high',riskHigh:'High',riskCritical:'Critical',platformWhatsApp:'WhatsApp',platformTelegram:'Telegram',platformGmail:'Gmail',platformOutlook:'Outlook',platformWeb:'Web',urgencyHigh:'High',urgencyMedium:'Medium',urgencyLow:'Low',trustLow:'Low',trustMedium:'Medium',trustHigh:'High',loadingCurrentTab:'Loading current tab...',awaitingAnalysis:'Awaiting analysis',localRecommendation:'Content remains local while Gemini Nano evaluates the active tab.',pendingLocalSummary:'Pending local analysis.',moreActions:'More actions',close:'Close',languageEnglish:'English',languagePortuguese:'Portuguese',chatInspector:'Selected chat',historicalPeak:'Historical peak',observations:'Observations',lastUpdated:'Last updated',noChatSelected:'Select a recent or dangerous chat to inspect its local metadata.',activeChat:'Active chat',selectedFromHistory:'Selected from local history',currentRiskHigh:'High',currentRiskMedium:'Medium',currentRiskLow:'Low',telegramNotReady:'Telegram Web support is coming soon. For now, spAI-Defender analyzes WhatsApp Web chats.',ptAiNote:'AI analysis has limited Portuguese support. Local rules are the main signal for this content.'
   },
   'pt-BR': {
     currentRisk:'Risco atual',confidence:'Confiança',extract:'Extração',risk:'Risco',language:'Linguagem',summary:'Resumo',
@@ -32,7 +33,7 @@ const translations = {
     summarizing:'Gerando resumo local',complete:'Análise local concluída',partial:'Análise concluída com resultados parciais',
     noEvidence:'Nenhuma evidência maliciosa validada foi observada.',storageUnavailable:'Métricas locais indisponíveis',
     aiUnavailable:'Gemini Nano indisponível. O risco permanece inconclusivo.',noContent:'Nenhum conteúdo analisável foi extraído.',
-    promptComplete:'Análise personalizada concluída.',yes:'Sim',no:'Não',unknown:'Desconhecido',historyWindow:'dias',localMetadataEvents:'eventos locais de metadados',recentChats:'Chats recentes',dangerousChats:'Chats mais perigosos',noRecentChats:'Nenhum chat recente do WhatsApp ainda.',noDangerousChats:'Nenhum chat perigoso do WhatsApp ainda.',highRisk:'Alto risco',mediumRisk:'Risco médio',visibleNow:'visíveis agora',statusValid:'Válido',statusInconclusive:'Inconclusivo',statusFailed:'Falha',classPhishing:'Phishing',classScam:'Golpe',classSocialEngineering:'Engenharia social',classSuspicious:'Suspeito',classSafe:'Seguro',riskLow:'Baixo',riskMedium:'Médio',riskMediumHigh:'Médio-alto',riskHigh:'Alto',riskCritical:'Crítico',platformWhatsApp:'WhatsApp',platformTelegram:'Telegram',platformGmail:'Gmail',platformOutlook:'Outlook',platformWeb:'Web',urgencyHigh:'Alta',urgencyMedium:'Média',urgencyLow:'Baixa',trustLow:'Baixa',trustMedium:'Média',trustHigh:'Alta',loadingCurrentTab:'Carregando aba atual...',awaitingAnalysis:'Aguardando análise',localRecommendation:'O conteúdo permanece local enquanto o Gemini Nano avalia a aba ativa.',pendingLocalSummary:'Análise local pendente.',moreActions:'Mais ações',close:'Fechar',languageEnglish:'Inglês',languagePortuguese:'Português',chatInspector:'Chat selecionado',historicalPeak:'Pico histórico',observations:'Ocorrências',lastUpdated:'Última atualização',noChatSelected:'Selecione um chat recente ou perigoso para inspecionar os metadados locais.',activeChat:'Chat ativo',selectedFromHistory:'Selecionado do histórico local',currentRiskHigh:'Alto',currentRiskMedium:'Médio',currentRiskLow:'Baixo',telegramNotReady:'O suporte ao Telegram Web chegará em breve. Por enquanto, o spAI-Defender analisa conversas do WhatsApp Web.'
+    promptComplete:'Análise personalizada concluída.',yes:'Sim',no:'Não',unknown:'Desconhecido',historyWindow:'dias',localMetadataEvents:'eventos locais de metadados',recentChats:'Chats recentes',dangerousChats:'Chats mais perigosos',noRecentChats:'Nenhum chat recente do WhatsApp ainda.',noDangerousChats:'Nenhum chat perigoso do WhatsApp ainda.',highRisk:'Alto risco',mediumRisk:'Risco médio',visibleNow:'visíveis agora',statusValid:'Válido',statusInconclusive:'Inconclusivo',statusFailed:'Falha',classPhishing:'Phishing',classScam:'Golpe',classSocialEngineering:'Engenharia social',classSuspicious:'Suspeito',classSafe:'Seguro',riskLow:'Baixo',riskMedium:'Médio',riskMediumHigh:'Médio-alto',riskHigh:'Alto',riskCritical:'Crítico',platformWhatsApp:'WhatsApp',platformTelegram:'Telegram',platformGmail:'Gmail',platformOutlook:'Outlook',platformWeb:'Web',urgencyHigh:'Alta',urgencyMedium:'Média',urgencyLow:'Baixa',trustLow:'Baixa',trustMedium:'Média',trustHigh:'Alta',loadingCurrentTab:'Carregando aba atual...',awaitingAnalysis:'Aguardando análise',localRecommendation:'O conteúdo permanece local enquanto o Gemini Nano avalia a aba ativa.',pendingLocalSummary:'Análise local pendente.',moreActions:'Mais ações',close:'Fechar',languageEnglish:'Inglês',languagePortuguese:'Português',chatInspector:'Chat selecionado',historicalPeak:'Pico histórico',observations:'Ocorrências',lastUpdated:'Última atualização',noChatSelected:'Selecione um chat recente ou perigoso para inspecionar os metadados locais.',activeChat:'Chat ativo',selectedFromHistory:'Selecionado do histórico local',currentRiskHigh:'Alto',currentRiskMedium:'Médio',currentRiskLow:'Baixo',telegramNotReady:'O suporte ao Telegram Web chegará em breve. Por enquanto, o spAI-Defender analisa conversas do WhatsApp Web.',ptAiNote:'A análise de IA tem suporte limitado ao português. As regras locais são o principal sinal para este conteúdo.'
   }
 };
 
@@ -46,7 +47,7 @@ const el = {
   riskPanel:byId('riskPanel'), riskScore:byId('riskScore'), riskLevel:byId('riskLevel'), classification:byId('classification'),
   analysisStatus:byId('analysisStatus'), recommendation:byId('recommendation'), confidenceFill:byId('confidenceFill'),
   confidenceValue:byId('confidenceValue'), evidenceCount:byId('evidenceCount'), signalChips:byId('signalChips'),
-  evidenceList:byId('evidenceList'), summaryContent:byId('summaryContent'), notice:byId('notice'),
+  evidenceList:byId('evidenceList'), summaryContent:byId('summaryContent'), notice:byId('notice'), aiLanguageNote:byId('aiLanguageNote'),
   contentPlatform:byId('contentPlatform'), contentLanguage:byId('contentLanguage'), contentWords:byId('contentWords'),
   contentMessages:byId('contentMessages'), contentLinks:byId('contentLinks'), contentForms:byId('contentForms'),
   valenceValue:byId('valenceValue'), arousalValue:byId('arousalValue'), dominanceValue:byId('dominanceValue'),
@@ -223,11 +224,18 @@ const AI_STATE_LABEL_KEYS = {
 };
 let aiState = 'unavailable';
 let downloadInFlight = false;
+function updateLanguageNote() {
+  if (!el.aiLanguageNote) return;
+  const show = aiAvailable && looksPortuguese(extractedContent?.bodyText || '');
+  setText(el.aiLanguageNote, show ? t('ptAiNote') : '');
+  el.aiLanguageNote.hidden = !show;
+}
 function renderAIState(state) {
   aiState = state;
   el.aiChip.dataset.state = state;
   aiAvailable = isAvailabilityReady(state);
   setText(el.aiStatus, t(AI_STATE_LABEL_KEYS[state] || 'unavailable'));
+  updateLanguageNote();
   const canDownload = state === AVAILABILITY.DOWNLOADABLE || state === AVAILABILITY.DOWNLOADING;
   if (el.modelDownload) el.modelDownload.hidden = !canDownload && !downloadInFlight;
   if (el.downloadModelBtn) el.downloadModelBtn.disabled = downloadInFlight;
@@ -486,6 +494,7 @@ async function extractContent({ preferSnapshot=true } = {}) {
   return response.content;
 }
 function renderContentMetrics() {
+  updateLanguageNote();
   const stats = extractedContent?.stats || {};
   setText(el.contentPlatform, localizePlatform(currentPlatform));
   setText(el.contentWords, stats.wordCount ?? '--');
