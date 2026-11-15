@@ -84,3 +84,9 @@ Known limits:
 - The same author wrote the curated set and the rules, so tune results overstate real accuracy. The drop from tune to holdout shows how much the rules fit the wording of the tune messages.
 - Messages that carry no request yet (for example "this is my new number, save it") are left to the AI classifier on purpose, because the legit family messages look the same.
 - The `.invalid` link signal reflects the reserved domain used in the synthetic data and has no meaning for real traffic.
+
+## Independent set and baseline
+
+`datasets/ptbr-independent.jsonl` is a second, independently written set of 200 messages (100 scam, 100 legit) used only for measurement. It must not be used for tuning. See `datasets/README.md`. The holdout of the first curated set was already consumed during rule design, so this set is the only remaining unbiased check.
+
+Baseline measured once on the unchanged detector at threshold 55, with `npm run eval -- eval/datasets/ptbr-independent.jsonl --top 10`: precision 80.3 percent, recall 61.0 percent, F1 69.3 percent, false-positive rate 15.0 percent (TP 61, FP 15, TN 85, FN 39). Weakest scam categories were photo_video_link_bait (0 of 5), fake_rental_deposit and qr_pix_key_swap (1 of 5 each). Legit categories with the most false positives were scam_warning_forward (3 of 5), delivery_real, pix_friends, tax_real_talk and utility_real (2 of 5 each).
