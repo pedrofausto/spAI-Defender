@@ -5,8 +5,13 @@
 
 import { AVAILABILITY, normalizeAvailability, isAvailabilityReady } from '../utils/ai-availability.js';
 
+import {
+  SUPPORTED_AI_LANGUAGES,
+  pickOutputLanguage,
+  normalizeLanguageModelExpectations
+} from '../utils/ai-language-options.js';
+
 const REQ_TYPE = 'SPAI_OFFSCREEN_AI_REQUEST';
-const SUPPORTED_OUTPUT_LANGUAGES = new Set(['de', 'en', 'es', 'fr', 'ja']);
 const PROMPT_TIMEOUT_MS = 90000;
 const DESTROYED_SESSION_ERROR_FRAGMENT = 'session has been destroyed';
 let sessionSeq = 0;
@@ -25,34 +30,13 @@ function nextSessionId() {
   return `lm_${Date.now()}_${sessionSeq}`;
 }
 
-function pickOutputLanguage() {
-  const raw = (typeof navigator !== 'undefined' && navigator.language ? navigator.language : 'en').toLowerCase();
-  const lang = raw.split('-')[0];
-  return SUPPORTED_OUTPUT_LANGUAGES.has(lang) ? lang : 'en';
-}
 
 
 function normalizeSummarizerOptions(inputOptions = {}) {
   const options = { ...(inputOptions || {}) };
-  options.outputLanguage = SUPPORTED_OUTPUT_LANGUAGES.has(options.outputLanguage)
+  options.outputLanguage = SUPPORTED_AI_LANGUAGES.has(options.outputLanguage)
     ? options.outputLanguage
-    : pickOutputLanguage();
-  return options;
-}
-
-function normalizeLanguageModelExpectations(options) {
-  const outputLanguage = SUPPORTED_OUTPUT_LANGUAGES.has(options.outputLanguage) ? options.outputLanguage : pickOutputLanguage();
-
-  options.outputLanguage = outputLanguage;
-
-  if (!Array.isArray(options.expectedInputs) || options.expectedInputs.length === 0) {
-    options.expectedInputs = [{ type: 'text', languages: Array.from(new Set(['en', outputLanguage])) }];
-  }
-
-  if (!Array.isArray(options.expectedOutputs) || options.expectedOutputs.length === 0) {
-    options.expectedOutputs = [{ type: 'text', languages: [outputLanguage] }];
-  }
-
+    : pickOutputLanguage(typeof navigator !== 'undefined' ? navigator.language : undefined);
   return options;
 }
 
@@ -303,7 +287,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         const session = ensured.session || ensured;
         const actualSessionId = ensured.sessionId || sessionId;
         const outLang =
-          (options && typeof options === 'object' && options.outputLanguage) ? options.outputLanguage : pickOutputLanguage();
+          (options && typeof options === 'object' && options.outputLanguage) ? options.outputLanguage : pickOutputLanguage(typeof navigator !== 'undefined' ? navigator.language : undefined);
 
         if (!entry) {
           throw new Error('AI_SESSION_MISSING: Session not found');

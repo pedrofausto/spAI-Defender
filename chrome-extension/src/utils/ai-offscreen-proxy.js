@@ -5,36 +5,16 @@
 
 import { AVAILABILITY, normalizeAvailability, isAvailabilityReady } from './ai-availability.js';
 
+import { normalizeLanguageModelExpectations } from './ai-language-options.js';
+
 const OFFSCREEN_URL = 'src/offscreen/offscreen.html';
 const REQ_TYPE = 'SPAI_OFFSCREEN_AI_REQUEST';
-const SUPPORTED_OUTPUT_LANGUAGES = new Set(['de', 'en', 'es', 'fr', 'ja']);
 const PROMPT_REQUEST_TIMEOUT_MS = 190000;
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-function pickOutputLanguage() {
-  const raw = (typeof navigator !== 'undefined' && navigator.language ? navigator.language : 'en').toLowerCase();
-  const lang = raw.split('-')[0];
-  return SUPPORTED_OUTPUT_LANGUAGES.has(lang) ? lang : 'en';
-}
-
-function normalizeLanguageModelExpectations(options) {
-  const outputLanguage = SUPPORTED_OUTPUT_LANGUAGES.has(options.outputLanguage) ? options.outputLanguage : pickOutputLanguage();
-
-  options.outputLanguage = outputLanguage;
-
-  if (!Array.isArray(options.expectedInputs) || options.expectedInputs.length === 0) {
-    options.expectedInputs = [{ type: 'text', languages: Array.from(new Set(['en', outputLanguage])) }];
-  }
-
-  if (!Array.isArray(options.expectedOutputs) || options.expectedOutputs.length === 0) {
-    options.expectedOutputs = [{ type: 'text', languages: [outputLanguage] }];
-  }
-
-  return options;
-}
 
 function normalizeSessionOptions(inputOptions = {}) {
   const options = { ...(inputOptions || {}) };
