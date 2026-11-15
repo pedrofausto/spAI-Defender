@@ -537,6 +537,34 @@ describe('PhishingDetector', () => {
 
 
 
+    test('caps a lone AI verdict that the hybrid weighting lifts above the cap', async () => {
+      const text = 'Lunch at noon tomorrow, see you there';
+      expect(detector.quickDetect(text).score).toBeLessThan(20);
+      jest.spyOn(detector, '_detectPhishingSimple').mockResolvedValue({
+        status: 'VALID',
+        classification: 'SCAM',
+        riskScore: 60,
+        riskLevel: 'MEDIUM_HIGH',
+        confidence: 90,
+        isPhishing: true,
+        semanticSignals: [],
+        evidence: [],
+        suspiciousPhrases: []
+      });
+      detector.hybridScorer.calculateHybridScore.mockReturnValue({
+        finalRiskScore: 80,
+        riskLevel: 'HIGH',
+        isPhishing: true
+      });
+
+      const result = await detector.detectPhishingAdvanced('https://example.test', text);
+
+      expect(result.finalRiskScore).toBe(54);
+      expect(result.riskLevel).toBe('MEDIUM_HIGH');
+      expect(result.classification).toBe('SUSPICIOUS');
+      expect(result.loneAiVerdictCapped).toBe(true);
+    });
+
     test('preserves validated Gemini classification in the hybrid response', async () => {
       jest.spyOn(detector, '_detectPhishingSimple').mockResolvedValue({
         status: 'VALID',
@@ -656,8 +684,24 @@ describe('PhishingDetector', () => {
       });
 
       const initial = detector.threatsToday;
-      await detector.detectSocialEngineering('Manipulative message');
+      // Rules also flag this text (score 40), so the AI verdict is not a lone one and is not capped.
+      await detector.detectSocialEngineering('Seu pix foi estornado, confirme seus dados aqui');
       expect(detector.threatsToday).toBeGreaterThan(initial);
+    });
+
+    // Intentional change: a lone AI social-engineering verdict on text the rules do not flag is capped
+    // and is not counted as a threat, because the cap means "needs review" and not an alarm.
+    test('does not count a capped lone AI verdict as a threat', async () => {
+      mockAIManager.getOrCreateSession = jest.fn().mockResolvedValue({
+        prompt: jest.fn().mockResolvedValue(
+          '{"status":"VALID","language":"en","riskScore":70,"riskLevel":"HIGH","confidence":80,"classification":"SOCIAL_ENGINEERING","semanticSignals":["authority_impersonation","urgent_action"],"evidence":["claims authority and demands immediate action"],"suspiciousPhrases":["urgent"],"recommendation":"WARNING"}'
+        )
+      });
+
+      const initial = detector.threatsToday;
+      const result = await detector.detectSocialEngineering('Manipulative message');
+      expect(result.manipulationScore).toBe(54);
+      expect(detector.threatsToday).toBe(initial);
     });
 
     test('should handle API errors gracefully', async () => {
@@ -700,9 +744,12 @@ describe('PhishingDetector', () => {
 
       expect(prompt).toHaveBeenCalled();
       expect(result.detectionMethod).toBe('gemini_nano_validated');
-      expect(result.isSocialEngineering).toBe(true);
+      // Intentional change: rules score this text at 0, so the AI-only verdict of 84 is capped at 54 and
+      // reported as needing review (lone-ai-verdict.js). It is no longer a social-engineering alarm.
+      expect(result.isSocialEngineering).toBe(false);
+      expect(result.classification).toBe('SUSPICIOUS');
       expect(result.tactics).toContain('authority_impersonation');
-      expect(result.manipulationScore).toBe(84);
+      expect(result.manipulationScore).toBe(54);
     });
 
     test('rejects invalid social-engineering AI JSON as inconclusive', async () => {

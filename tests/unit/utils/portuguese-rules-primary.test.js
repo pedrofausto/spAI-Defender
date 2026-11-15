@@ -63,19 +63,44 @@ describe('Portuguese content: rules primary, AI may only raise', () => {
     });
   });
 
-  test('legit Portuguese message with AI high risk: AI may raise (documented behavior)', async () => {
+  // Intentional change: the earlier expectation was that a lone AI high-risk verdict on benign text
+  // reached >= 75 on the simple path. Under the lone-AI policy (lone-ai-verdict.js), rules at 0 cap it at 54
+  // and report it as SUSPICIOUS ("needs review") instead of a malicious alarm.
+  test('legit Portuguese message with AI high risk: a lone AI verdict is capped at 54 and needs review', async () => {
     const highRisk = ai({
       riskScore: 85, riskLevel: 'HIGH', classification: 'SCAM', recommendation: 'DANGEROUS',
       semanticSignals: ['payment_request', 'urgent_action'], evidence: ['asks to buy something'], suspiciousPhrases: ['por favor']
     });
     const detector = makeDetector(jest.fn().mockResolvedValue(highRisk));
-    expect(detector.quickDetect(PT_LEGIT).score).toBeLessThan(25);
+    expect(detector.quickDetect(PT_LEGIT).score).toBeLessThan(20);
 
     const simple = await detector.detectPhishing('https://web.whatsapp.com', PT_LEGIT, 'WhatsApp', [], false);
-    expect(simple.heuristicScore).toBeLessThan(25);
-    expect(simple.finalRiskScore).toBeGreaterThanOrEqual(75); // simple path: the AI verdict raises the score uncapped
+    expect(simple.heuristicScore).toBeLessThan(20);
+    expect(simple.finalRiskScore).toBe(54);
+    expect(simple.classification).toBe('SUSPICIOUS');
+    expect(simple.isPhishing).toBe(false);
+    expect(simple.recommendation).toBe('CAUTION');
+    expect(simple.loneAiVerdictCapped).toBe(true);
 
     const advanced = await detector.detectPhishing('https://web.whatsapp.com', PT_LEGIT, 'WhatsApp', [], true);
-    expect(advanced.finalRiskScore).toBeGreaterThanOrEqual(advanced.heuristicScore); // advanced path: weighted, may be diluted
+    expect(advanced.finalRiskScore).toBeLessThanOrEqual(54);
+    expect(advanced.finalRiskScore).toBeGreaterThanOrEqual(advanced.heuristicScore); // the floor still holds
+    expect(['PHISHING', 'SCAM', 'SOCIAL_ENGINEERING']).not.toContain(advanced.classification);
+  });
+
+  test('rules at 40 (below the scam threshold but above the floor): the AI may still raise the score above the cap', async () => {
+    const PT_MODERATE = 'Seu pix foi estornado, confirme seus dados aqui';
+    const highRisk = ai({
+      riskScore: 85, riskLevel: 'HIGH', classification: 'SCAM', recommendation: 'DANGEROUS',
+      semanticSignals: ['payment_request', 'urgent_action'], evidence: ['asks for personal data'], suspiciousPhrases: ['confirme']
+    });
+    const detector = makeDetector(jest.fn().mockResolvedValue(highRisk));
+    const rule = detector.quickDetect(PT_MODERATE).score;
+    expect(rule).toBeGreaterThanOrEqual(20);
+    expect(rule).toBeLessThan(55);
+
+    const simple = await detector.detectPhishing('https://web.whatsapp.com', PT_MODERATE, 'WhatsApp', [], false);
+    expect(simple.finalRiskScore).toBeGreaterThanOrEqual(75);
+    expect(simple.loneAiVerdictCapped).toBeUndefined();
   });
 });

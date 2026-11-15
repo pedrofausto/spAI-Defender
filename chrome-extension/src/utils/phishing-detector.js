@@ -9,6 +9,7 @@ import { LinguisticAnalyzer } from './linguistic-analyzer.js';
 import { LocalAIThreatClassifier } from './local-ai-threat-classifier.js';
 import { QUICK_DETECT_PATTERNS } from './message-risk-patterns.js';
 import { scoreMessage } from './scam-rules.js';
+import { applyLoneAiVerdictCap } from './lone-ai-verdict.js';
 
 const THREAT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const THREAT_HISTORY_LIMIT = 250;
@@ -116,7 +117,8 @@ export class PhishingDetector {
       if (merged.recommendation === 'SAFE') merged.recommendation = 'CAUTION';
     }
 
-    return merged;
+    // When the rules see almost nothing, an AI-only risk verdict is capped and reported as needing review.
+    return applyLoneAiVerdictCap(merged, heuristicScore);
   }
 
   /**
@@ -349,8 +351,9 @@ export class PhishingDetector {
       // Deterministic floor: hybrid weighting must not reduce risk below the heuristic level.
       const floredFinalRiskScore = Math.max(hybridScore.finalRiskScore, heuristicScore);
 
-      // Combine all analysis components
-      return {
+      // Combine all analysis components. The lone AI cap applies here too, because the hybrid
+      // weighting can lift a capped AI verdict above the cap on its own.
+      const combined = {
         ...hybridScore,
         finalRiskScore: floredFinalRiskScore,
         riskLevel: floredFinalRiskScore > hybridScore.finalRiskScore
@@ -371,6 +374,7 @@ export class PhishingDetector {
           linguistic: linguisticFeatures
         }
       };
+      return applyLoneAiVerdictCap(combined, heuristicScore);
 
     } catch (error) {
       console.error('Error in advanced phishing detection:', error);
@@ -436,7 +440,9 @@ export class PhishingDetector {
       const result = {
         ...analysis,
         manipulationScore: analysis.riskScore || 0,
-        isSocialEngineering: analysis.classification === 'SOCIAL_ENGINEERING' || tactics.length >= 2,
+        // A lone AI verdict that was capped (rules under the floor) is "needs review", not a social-engineering alarm.
+        isSocialEngineering: !analysis.loneAiVerdictCapped &&
+          (analysis.classification === 'SOCIAL_ENGINEERING' || tactics.length >= 2),
         tactics,
         emotionalTriggers: tactics.filter(signal => signal === 'urgent_action' || signal === 'account_threat' || signal === 'authority_impersonation'),
         suspiciousPhrases: analysis.suspiciousPhrases || [],
