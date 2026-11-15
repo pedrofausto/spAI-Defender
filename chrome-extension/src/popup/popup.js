@@ -1,3 +1,6 @@
+import { AVAILABILITY, normalizeAvailability, isAvailabilityReady } from '../utils/ai-availability.js';
+import { normalizeLanguageModelExpectations } from '../utils/ai-language-options.js';
+
 const translations = {
   en: {
     currentRisk:'Current risk',confidence:'Confidence',extract:'Extract',risk:'Risk',language:'Language',summary:'Summary',
@@ -8,7 +11,7 @@ const translations = {
     manipulation:'Manipulation',trust:'Trust',history:'Local history',reanalyze:'Reanalyze',extractAgain:'Extract again',
     customPrompt:'Custom prompt',technicalDetails:'Technical details',cancel:'Cancel',send:'Send',
     pending:'Pending',running:'Running',done:'Done',failed:'Failed',checking:'Checking',available:'Available',
-    unavailable:'Unavailable',downloading:'Downloading',preparing:'Preparing local analysis',extracting:'Extracting visible content',
+    unavailable:'Unavailable',downloadable:'Download required',downloading:'Downloading',downloadModel:'Download model',downloadingModel:'Downloading model',downloadReady:'Model downloaded. Local analysis can run.',downloadFailed:'The model download failed. Try again.',downloadNeeded:'Download the Gemini Nano model to run local analysis. Analysis is paused until it is available.',downloadInProgress:'The Gemini Nano model is downloading. Analysis is paused until it is available.',downloadNoApi:'The model download cannot be started from this page in this Chrome version.',preparing:'Preparing local analysis',extracting:'Extracting visible content',
     analyzingRisk:'Analyzing phishing and scam risk',analyzingLanguage:'Analyzing emotional manipulation',
     summarizing:'Generating local summary',complete:'Local analysis complete',partial:'Analysis completed with partial results',
     noEvidence:'No validated malicious evidence was observed.',storageUnavailable:'Local metrics unavailable',
@@ -24,7 +27,7 @@ const translations = {
     manipulation:'Manipulação',trust:'Confiança',history:'Histórico local',reanalyze:'Reanalisar',extractAgain:'Extrair novamente',
     customPrompt:'Prompt personalizado',technicalDetails:'Detalhes técnicos',cancel:'Cancelar',send:'Enviar',
     pending:'Pendente',running:'Executando',done:'Concluído',failed:'Falhou',checking:'Verificando',available:'Disponível',
-    unavailable:'Indisponível',downloading:'Baixando',preparing:'Preparando análise local',extracting:'Extraindo conteúdo visível',
+    unavailable:'Indisponível',downloadable:'Download necessário',downloading:'Baixando',downloadModel:'Baixar modelo',downloadingModel:'Baixando o modelo',downloadReady:'Modelo baixado. A análise local já pode ser executada.',downloadFailed:'Falha ao baixar o modelo. Tente novamente.',downloadNeeded:'Baixe o modelo Gemini Nano para executar a análise local. A análise fica pausada até que ele esteja disponível.',downloadInProgress:'O modelo Gemini Nano está sendo baixado. A análise fica pausada até que ele esteja disponível.',downloadNoApi:'O download do modelo não pode ser iniciado a partir desta página nesta versão do Chrome.',preparing:'Preparando análise local',extracting:'Extraindo conteúdo visível',
     analyzingRisk:'Analisando risco de phishing e golpe',analyzingLanguage:'Analisando manipulação emocional',
     summarizing:'Gerando resumo local',complete:'Análise local concluída',partial:'Análise concluída com resultados parciais',
     noEvidence:'Nenhuma evidência maliciosa validada foi observada.',storageUnavailable:'Métricas locais indisponíveis',
@@ -37,6 +40,7 @@ const locale = String(navigator.language || 'en').toLowerCase().startsWith('pt')
 const t = key => translations[locale][key] || translations.en[key] || key;
 const byId = id => document.getElementById(id);
 const el = {
+  modelDownload:byId('modelDownload'), downloadModelBtn:byId('downloadModelBtn'), downloadProgressFill:byId('downloadProgressFill'), downloadProgressLabel:byId('downloadProgressLabel'),
   aiChip:byId('aiChip'), statusIcon:byId('statusIcon'), aiStatus:byId('aiStatus'), tabContext:byId('tabContext'),
   progressLabel:byId('progressLabel'), progressValue:byId('progressValue'), progressFill:byId('progressFill'),
   riskPanel:byId('riskPanel'), riskScore:byId('riskScore'), riskLevel:byId('riskLevel'), classification:byId('classification'),
@@ -207,27 +211,80 @@ async function requestWhatsAppVisibleReanalysis() {
   }
 }
 function statusFromAvailability(status) {
-  if (['readily','available'].includes(status)) return 'available';
-  if (['downloading','downloadable','after-download'].includes(status)) return 'downloading';
-  return status === 'error' ? 'error' : 'unavailable';
+  return status === 'error' ? 'error' : normalizeAvailability(status);
 }
 async function loadCurrentTab() {
   const [tab] = await chrome.tabs.query({ active:true, currentWindow:true });
   currentTab = tab || null;
   setText(el.tabContext, tab ? (tab.title || tab.url || 'Untitled') : t('unknown'));
 }
+const AI_STATE_LABEL_KEYS = {
+  available:'available', downloadable:'downloadable', downloading:'downloading', unavailable:'unavailable', error:'unavailable'
+};
+let aiState = 'unavailable';
+let downloadInFlight = false;
+function renderAIState(state) {
+  aiState = state;
+  el.aiChip.dataset.state = state;
+  aiAvailable = isAvailabilityReady(state);
+  setText(el.aiStatus, t(AI_STATE_LABEL_KEYS[state] || 'unavailable'));
+  const canDownload = state === AVAILABILITY.DOWNLOADABLE || state === AVAILABILITY.DOWNLOADING;
+  if (el.modelDownload) el.modelDownload.hidden = !canDownload && !downloadInFlight;
+  if (el.downloadModelBtn) el.downloadModelBtn.disabled = downloadInFlight;
+}
 async function checkAIAvailability() {
   try {
     const response = await sendMessage({ type:'CHECK_AI_AVAILABILITY' });
-    const availability = response.success ? response.availability : 'unavailable';
-    const state = statusFromAvailability(availability);
-    el.aiChip.dataset.state = state;
-    aiAvailable = ['available','downloading'].includes(state);
-    setText(el.aiStatus, state === 'available' ? t('available') : state === 'downloading' ? t('downloading') : t('unavailable'));
+    renderAIState(statusFromAvailability(response.success ? response.availability : 'unavailable'));
   } catch {
-    el.aiChip.dataset.state = 'error';
-    setText(el.aiStatus, t('unavailable'));
-    aiAvailable = false;
+    renderAIState('error');
+  }
+}
+function aiNotReadyMessage() {
+  if (aiState === AVAILABILITY.DOWNLOADABLE) return t('downloadNeeded');
+  if (aiState === AVAILABILITY.DOWNLOADING) return t('downloadInProgress');
+  return t('aiUnavailable');
+}
+function setDownloadProgress(fraction) {
+  const value = Math.max(0, Math.min(1, Number(fraction) || 0));
+  const percent = Math.round(value * 100);
+  if (el.downloadProgressFill) el.downloadProgressFill.style.width = `${percent}%`;
+  setText(el.downloadProgressLabel, `${t('downloadingModel')} ${percent}%`);
+}
+/**
+ * Starts the model download from a user click. Chrome docs require user activation to call create() while the
+ * model is downloadable or downloading (https://developer.chrome.com/docs/ai/get-started, User activation), and the
+ * Prompt API is exposed to top-level windows, so the extension popup performs the create() call itself. The offscreen
+ * document never receives the click. The options must match the ones used by the offscreen runtime for availability().
+ */
+async function startModelDownload() {
+  if (downloadInFlight) return;
+  if (typeof LanguageModel === 'undefined' || typeof LanguageModel.create !== 'function') {
+    showNotice(t('downloadNoApi'));
+    return;
+  }
+  downloadInFlight = true;
+  renderAIState(AVAILABILITY.DOWNLOADING);
+  setDownloadProgress(0);
+  showNotice('');
+  let session = null;
+  try {
+    const options = normalizeLanguageModelExpectations({});
+    options.monitor = monitor => monitor.addEventListener('downloadprogress', event => setDownloadProgress(event.loaded));
+    session = await LanguageModel.create(options);
+    setDownloadProgress(1);
+  } catch (error) {
+    console.warn('Model download failed:', error?.name || '', error?.message || error);
+    showNotice(t('downloadFailed'));
+  } finally {
+    try { await session?.destroy?.(); } catch {}
+    downloadInFlight = false;
+  }
+  await checkAIAvailability();
+  if (aiAvailable) {
+    showNotice(t('downloadReady'));
+    if (el.modelDownload) el.modelDownload.hidden = true;
+    await runFullAnalysis({ forceExtract:false });
   }
 }
 async function detectPlatform() {
@@ -492,9 +549,10 @@ async function runFullAnalysis({ forceExtract=true }={}) {
       catch(error){setStep('stepExtract','failed',t('failed'));showNotice(friendlyErrorMessage(error));setProgress(100,t('partial'));return;}
     } else setStep('stepExtract','done',t('done'));
     if (!aiAvailable) {
-      renderRisk({ status:'INCONCLUSIVE',classification:'INCONCLUSIVE',riskLevel:'UNKNOWN',confidence:0,recommendation:t('aiUnavailable') });
-      ['stepRisk','stepSentiment','stepSummary'].forEach(id=>setStep(id,'failed',t('unavailable')));
-      showNotice(t('aiUnavailable')); setProgress(100,t('partial')); return;
+      const notReady = aiState === AVAILABILITY.DOWNLOADABLE || aiState === AVAILABILITY.DOWNLOADING;
+      renderRisk({ status:'INCONCLUSIVE',classification:'INCONCLUSIVE',riskLevel:'UNKNOWN',confidence:0,recommendation:aiNotReadyMessage() });
+      ['stepRisk','stepSentiment','stepSummary'].forEach(id=>setStep(id,notReady?'pending':'failed',notReady?t('pending'):t('unavailable')));
+      showNotice(aiNotReadyMessage()); setProgress(100,t('partial')); return;
     }
     setStep('stepRisk','running',t('running')); setProgress(25,t('analyzingRisk'));
     try {
@@ -515,6 +573,7 @@ async function runFullAnalysis({ forceExtract=true }={}) {
   } finally { running=false; el.reanalyzeBtn.disabled=false; }
 }
 function setupEvents() {
+  if (el.downloadModelBtn) el.downloadModelBtn.addEventListener('click',startModelDownload);
   el.reanalyzeBtn.addEventListener('click',()=>runFullAnalysis({forceExtract:true}));
   el.moreBtn.addEventListener('click',()=>{el.moreMenu.hidden=!el.moreMenu.hidden;el.moreBtn.setAttribute('aria-expanded',String(!el.moreMenu.hidden));});
   el.extractBtn.addEventListener('click',()=>{el.moreMenu.hidden=true;runFullAnalysis({forceExtract:true});});

@@ -19,6 +19,12 @@
       </div>
     </header>
 
+    <section id="modelDownload" class="model-download" hidden>
+      <button id="downloadModelBtn" class="primary-action" type="button" data-i18n="downloadModel">Download model</button>
+      <div class="download-track" aria-hidden="true"><div id="downloadProgressFill"></div></div>
+      <span id="downloadProgressLabel" aria-live="polite"></span>
+    </section>
+
     <section class="analysis-state" aria-live="polite">
       <span id="progressLabel">Preparing local analysis</span>
       <span id="progressValue">0%</span>

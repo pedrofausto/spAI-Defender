@@ -19,6 +19,7 @@ function renderPopupDom() {
     <section id="promptSection" hidden><textarea id="promptInput"></textarea><button id="sendPromptBtn"></button><button id="cancelPromptBtn"></button></section>
     <section id="technicalSection" hidden><pre id="technicalContent"></pre><button id="closeTechnicalBtn"></button></section>
     <div id="notice" hidden></div>
+    <section id="modelDownload" hidden><button id="downloadModelBtn"></button><div id="downloadProgressFill"></div><span id="downloadProgressLabel"></span></section>
     <span data-i18n="reanalyze"></span><span data-i18n="evidence"></span>
   `;
 }
@@ -73,7 +74,7 @@ describe('enterprise popup', () => {
 
   test('runs extraction, risk, sentiment and summary automatically with progressive metrics', async () => {
     setupChrome({
-      CHECK_AI_AVAILABILITY:{success:true,availability:'readily'},
+      CHECK_AI_AVAILABILITY:{success:true,availability:'available'},
       GET_THREAT_STATS:{success:true,stats:{total:3,today:1,recent:[],dashboard}},
       GET_WHATSAPP_CHAT_HISTORY:{success:true,chats:whatsappChats,recentChats:whatsappChats,dangerousChats},
       GET_PLATFORM_INFO:{success:true,platform:'WHATSAPP'},
@@ -124,7 +125,7 @@ describe('enterprise popup', () => {
 
   test('forces WhatsApp visible reanalysis when the user clicks Reanalyze', async () => {
     setupChrome({
-      CHECK_AI_AVAILABILITY:{success:true,availability:'readily'},
+      CHECK_AI_AVAILABILITY:{success:true,availability:'available'},
       GET_THREAT_STATS:{success:true,stats:{dashboard}},
       GET_WHATSAPP_CHAT_HISTORY:{success:true,chats:whatsappChats,recentChats:whatsappChats,dangerousChats},
       GET_PLATFORM_INFO:{success:true,platform:'WHATSAPP'},
@@ -149,7 +150,7 @@ describe('enterprise popup', () => {
 
   test('navigates dangerous and recent chats in the local history inspector', async () => {
     setupChrome({
-      CHECK_AI_AVAILABILITY:{success:true,availability:'readily'},
+      CHECK_AI_AVAILABILITY:{success:true,availability:'available'},
       GET_THREAT_STATS:{success:true,stats:{dashboard}},
       GET_WHATSAPP_CHAT_HISTORY:{success:true,chats:whatsappChats,recentChats:whatsappChats,dangerousChats},
       GET_PLATFORM_INFO:{success:true,platform:'WHATSAPP'},
@@ -174,7 +175,7 @@ describe('enterprise popup', () => {
 
   test('stays silent on sites other than WhatsApp Web and Telegram Web', async () => {
     setupChrome({
-      CHECK_AI_AVAILABILITY:{success:true,availability:'readily'},
+      CHECK_AI_AVAILABILITY:{success:true,availability:'available'},
       GET_THREAT_STATS:{success:true,stats:{dashboard}},
       GET_WHATSAPP_CHAT_HISTORY:{success:true,chats:[],recentChats:[],dangerousChats:[]},
       GET_PLATFORM_INFO:{success:true,platform:'WEB'}
@@ -191,7 +192,7 @@ describe('enterprise popup', () => {
 
   test('treats lookalike hosts and plain http as unsupported', async () => {
     setupChrome({
-      CHECK_AI_AVAILABILITY:{success:true,availability:'readily'},
+      CHECK_AI_AVAILABILITY:{success:true,availability:'available'},
       GET_THREAT_STATS:{success:true,stats:{dashboard}},
       GET_WHATSAPP_CHAT_HISTORY:{success:true,chats:[],recentChats:[],dangerousChats:[]},
       GET_PLATFORM_INFO:{success:true,platform:'WEB'}
@@ -205,7 +206,7 @@ describe('enterprise popup', () => {
 
   test('shows a localized coming-soon message on Telegram Web', async () => {
     setupChrome({
-      CHECK_AI_AVAILABILITY:{success:true,availability:'readily'},
+      CHECK_AI_AVAILABILITY:{success:true,availability:'available'},
       GET_THREAT_STATS:{success:true,stats:{dashboard}},
       GET_WHATSAPP_CHAT_HISTORY:{success:true,chats:[],recentChats:[],dangerousChats:[]},
       GET_PLATFORM_INFO:{success:true,platform:'TELEGRAM'},
@@ -222,7 +223,7 @@ describe('enterprise popup', () => {
   test('shows the Telegram coming-soon message in Portuguese', async () => {
     Object.defineProperty(global.navigator,'language',{value:'pt-BR',configurable:true});
     setupChrome({
-      CHECK_AI_AVAILABILITY:{success:true,availability:'readily'},
+      CHECK_AI_AVAILABILITY:{success:true,availability:'available'},
       GET_THREAT_STATS:{success:true,stats:{dashboard}},
       GET_WHATSAPP_CHAT_HISTORY:{success:true,chats:[],recentChats:[],dangerousChats:[]},
       GET_PLATFORM_INFO:{success:true,platform:'TELEGRAM'},
@@ -236,7 +237,7 @@ describe('enterprise popup', () => {
 
   test('keeps completed risk when sentiment and summary fail', async () => {
     setupChrome({
-      CHECK_AI_AVAILABILITY:{success:true,availability:'readily'},
+      CHECK_AI_AVAILABILITY:{success:true,availability:'available'},
       GET_THREAT_STATS:{success:true,stats:{dashboard}},
       GET_WHATSAPP_CHAT_HISTORY:{success:true,chats:[],recentChats:[],dangerousChats:[]},
       GET_PLATFORM_INFO:{success:true,platform:'WEB'},
@@ -253,5 +254,120 @@ describe('enterprise popup', () => {
     expect(document.getElementById('stepSummary').dataset.state).toBe('failed');
     expect(document.getElementById('progressLabel').textContent).toBe('Analysis completed with partial results');
   });
-});
 
+  describe('model availability states', () => {
+    const baseResponses = {
+      GET_THREAT_STATS:{success:true,stats:{total:0,today:0,recent:[],dashboard}},
+      GET_WHATSAPP_CHAT_HISTORY:{success:true,chats:[],recentChats:[],dangerousChats:[]},
+      GET_PLATFORM_INFO:{success:true,platform:'WHATSAPP'},
+      GET_LAST_WHATSAPP_SNAPSHOT:{success:false},
+      FORCE_WHATSAPP_REANALYSIS:{success:true,queued:false,visibleMessages:1},
+      GET_TAB_CONTENT:{success:true,content:{title:'Chat',url:'https://web.whatsapp.com/',bodyText:'hello',stats:{wordCount:1,paragraphCount:1,linkCount:0}}},
+      DETECT_PHISHING:{success:true,analysis:{status:'VALID',classification:'SAFE',riskLevel:'LOW',riskScore:5,confidence:80,recommendation:'SAFE',language:'en'}},
+      ANALYZE_SENTIMENT:{success:true,analysis:{valence:0,arousal:0,dominance:0,urgencyLevel:'LOW',manipulationDetected:false,trustworthiness:'HIGH'}},
+      SUMMARIZE_CONTENT:{success:true,summary:'ok'}
+    };
+    const sentTypes = () => chrome.runtime.sendMessage.mock.calls.map(([message]) => message.type);
+
+    afterEach(() => { delete global.LanguageModel; });
+
+    test('downloadable shows a download label (not Downloading), the button, and runs no analysis', async () => {
+      setupChrome({ ...baseResponses, CHECK_AI_AVAILABILITY:{success:true,availability:'downloadable'} });
+      await importPopup();
+      expect(document.getElementById('aiStatus').textContent).toBe('Download required');
+      expect(document.getElementById('aiChip').dataset.state).toBe('downloadable');
+      expect(document.getElementById('modelDownload').hidden).toBe(false);
+      expect(sentTypes()).not.toContain('DETECT_PHISHING');
+      expect(document.getElementById('notice').textContent).toContain('Download the Gemini Nano model');
+    });
+
+    test('downloading shows Downloading and runs no analysis', async () => {
+      setupChrome({ ...baseResponses, CHECK_AI_AVAILABILITY:{success:true,availability:'downloading'} });
+      await importPopup();
+      expect(document.getElementById('aiStatus').textContent).toBe('Downloading');
+      expect(sentTypes()).not.toContain('DETECT_PHISHING');
+      expect(document.getElementById('notice').textContent).toContain('is downloading');
+    });
+
+    test('unavailable shows Unavailable, hides the download button and runs no analysis', async () => {
+      setupChrome({ ...baseResponses, CHECK_AI_AVAILABILITY:{success:true,availability:'unavailable'} });
+      await importPopup();
+      expect(document.getElementById('aiStatus').textContent).toBe('Unavailable');
+      expect(document.getElementById('modelDownload').hidden).toBe(true);
+      expect(sentTypes()).not.toContain('DETECT_PHISHING');
+    });
+
+    test('legacy readily is treated as unavailable', async () => {
+      setupChrome({ ...baseResponses, CHECK_AI_AVAILABILITY:{success:true,availability:'readily'} });
+      await importPopup();
+      expect(document.getElementById('aiStatus').textContent).toBe('Unavailable');
+      expect(sentTypes()).not.toContain('DETECT_PHISHING');
+    });
+
+    test('available runs analysis and hides the download section', async () => {
+      setupChrome({ ...baseResponses, CHECK_AI_AVAILABILITY:{success:true,availability:'available'} });
+      await importPopup();
+      expect(document.getElementById('aiStatus').textContent).toBe('Available');
+      expect(document.getElementById('modelDownload').hidden).toBe(true);
+      expect(sentTypes()).toContain('DETECT_PHISHING');
+    });
+
+    test('pt-BR labels distinguish downloadable from downloading', async () => {
+      Object.defineProperty(global.navigator,'language',{value:'pt-BR',configurable:true});
+      setupChrome({ ...baseResponses, CHECK_AI_AVAILABILITY:{success:true,availability:'downloadable'} });
+      await importPopup();
+      expect(document.getElementById('aiStatus').textContent).toBe('Download necessário');
+      expect(document.getElementById('aiStatus').textContent).not.toBe('Baixando');
+      expect(document.getElementById('notice').textContent).toContain('Baixe o modelo Gemini Nano');
+    });
+
+    test('clicking Download model creates the session from the popup, shows progress, then re-checks and analyzes', async () => {
+      let availability = 'downloadable';
+      setupChrome({ ...baseResponses, CHECK_AI_AVAILABILITY:() => ({ success:true, availability }) });
+      const destroy = jest.fn().mockResolvedValue(undefined);
+      let seenOptions;
+      global.LanguageModel = {
+        create: jest.fn(async options => {
+          seenOptions = options;
+          let listener;
+          options.monitor({ addEventListener:(name, cb) => { if (name === 'downloadprogress') listener = cb; } });
+          listener({ loaded:0.5 });
+          expect(document.getElementById('downloadProgressFill').style.width).toBe('50%');
+          expect(document.getElementById('downloadProgressLabel').textContent).toContain('50%');
+          availability = 'available';
+          return { destroy };
+        })
+      };
+      await importPopup();
+      expect(sentTypes()).not.toContain('DETECT_PHISHING');
+
+      document.getElementById('downloadModelBtn').click();
+      await flushPipeline();
+
+      expect(global.LanguageModel.create).toHaveBeenCalledTimes(1);
+      expect(seenOptions.expectedInputs).toEqual([{ type:'text', languages:['en'] }]);
+      expect(seenOptions.expectedOutputs).toEqual([{ type:'text', languages:['en'] }]);
+      expect(destroy).toHaveBeenCalled();
+      expect(document.getElementById('aiStatus').textContent).toBe('Available');
+      expect(sentTypes()).toContain('DETECT_PHISHING');
+    });
+
+    test('a failed download keeps analysis paused and shows an error notice', async () => {
+      setupChrome({ ...baseResponses, CHECK_AI_AVAILABILITY:{success:true,availability:'downloadable'} });
+      global.LanguageModel = { create: jest.fn().mockRejectedValue(new Error('NotAllowedError')) };
+      await importPopup();
+      document.getElementById('downloadModelBtn').click();
+      await flushPipeline();
+      expect(document.getElementById('notice').textContent).toContain('download failed');
+      expect(sentTypes()).not.toContain('DETECT_PHISHING');
+    });
+
+    test('without a LanguageModel global in the popup the click explains the limitation', async () => {
+      setupChrome({ ...baseResponses, CHECK_AI_AVAILABILITY:{success:true,availability:'downloadable'} });
+      await importPopup();
+      document.getElementById('downloadModelBtn').click();
+      await flushPipeline();
+      expect(document.getElementById('notice').textContent).toContain('cannot be started from this page');
+    });
+  });
+});
