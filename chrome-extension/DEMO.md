@@ -93,7 +93,7 @@ Analysis is intentionally paused until the status is Available.
 
 ## Step 6: check the analysis on harmless sample messages
 
-The extension skips messages you send yourself when it applies the quick local highlight, so a chat with yourself will not show highlights. Use a second account or ask a friend to send you these fictional messages, or paste them into a group where it is fine to do so. They contain no real links or numbers.
+The extension skips messages you send yourself, both for the quick local highlight and for the AI analysis, so a chat with yourself will not show highlights. Use a second account or ask a friend to send you these fictional messages, or paste them into a group where it is fine to do so. They contain no real links or numbers.
 
 Message that should be flagged as risky:
 
@@ -125,7 +125,7 @@ The promise is that nothing leaves the machine apart from Chrome's own model dow
 2. In each developer tools window, open the Network tab, keep it open, and use the extension on WhatsApp Web as in steps 4 to 6.
 3. Expected: no requests to any external address made by the extension. Requests that belong to WhatsApp Web itself belong to the page, not to the extension.
 4. Open the Console tab. Expected: no message text, no sender names and no chat names printed. Operational lines are fine.
-5. In the service worker developer tools, open Application and then Storage. The WhatsApp snapshot and chat history should be in Session storage, not in Local storage. Local storage should hold no chat messages. It may still hold threat records with page addresses or evidence snippets, which is a known open item; note what you see.
+5. In the service worker developer tools, open Application and then Storage. The WhatsApp snapshot and chat history should be in Session storage, not in Local storage. Local storage should hold no chat messages. Threat records there should contain only a time, a risk score, a risk level, a classification, the platform and two counts. Any page address, title, sender name, message text or evidence snippet in Local storage is a bug: report the key name and what it contained, without copying private text.
 
 Report anything that contradicts these expectations.
 
